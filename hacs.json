@@ -1,8 +1,6 @@
 {
-  "name": "Apex Neptune",
+  "name": "Apex Neptune Monitor",
   "content_in_root": true,
   "render_readme": true,
-  "domains": ["apex"],
-  "zip_release": true,
-  "filename": "apex.zip"
+  "domains": ["apex"]
 }
