@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 
 from .const import (
     DOMAIN,
@@ -21,6 +22,7 @@ from .coordinator import ApexDataUpdateCoordinator
 from .const import CONF_LINE_VOLTAGE, DEFAULT_LINE_VOLTAGE, CONF_ENABLE_PER_OUTLET_POWER, \
     DEFAULT_ENABLE_PER_OUTLET_POWER
 
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 PLATFORMS: list[str] = ["sensor", "switch"]
 
 
