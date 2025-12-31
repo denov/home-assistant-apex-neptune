@@ -17,9 +17,10 @@ and makes it available in Home Assistant as sensors, read-only controls, and dia
 ## Installation
 ### Installation via HACS
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=denov&repository=home-assistant-apex-neptune&category=Integration)
-2. Use HACS to install the integration.
-3. Restart Home Assistant.
-4. Set up the integration using the UI:
+
+1. Use HACS to install the integration.
+1. Restart Home Assistant.
+1. Set up the integration using the UI:
 
 <a href="https://my.home-assistant.io/redirect/config_flow_start/?domain=apex" target="_blank" rel="noreferrer noopener">
  <img src="https://my.home-assistant.io/badges/config_flow_start.svg" alt="Add Integration">
