@@ -1,0 +1,15 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Apex Monitor Setup",
+        "description": "Enter your Neptune Apex connection info",
+        "data": {
+          "ip_address": "Apex IP Address",
+          "username": "Username",
+          "password": "Password"
+        }
+      }
+    }
+  }
+}
