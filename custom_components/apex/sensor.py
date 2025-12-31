@@ -18,7 +18,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util.dt import now as dt_now
 
-from .const import (
+from custom_components.apex.const import (
     DOMAIN,
     SENSOR_MAP,  # optional overrides: { "ProbeName": ("Friendly Name", unit_or_None) }
     CONF_TEMP_UNIT,
@@ -26,10 +26,10 @@ from .const import (
     CONF_AMPS_DIAGNOSTIC,
     DEFAULT_AMPS_DIAGNOSTIC,
 )
-from .coordinator import ApexDataUpdateCoordinator
-from .parsing import build_labels, one_apex_prefix, safe_uid_base
+from custom_components.apex.coordinator import ApexDataUpdateCoordinator
+from custom_components.apex.parsing import build_labels, one_apex_prefix, safe_uid_base
 from .sensor_helpers import icon_for_type, units_and_meta
-from .power_math import total_current_amps, total_power_watts
+from custom_components.apex.power_math import total_current_amps, total_power_watts
 
 
 async def async_setup_entry(hass, entry, async_add_entities):

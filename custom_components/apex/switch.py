@@ -9,8 +9,8 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
-from .coordinator import ApexDataUpdateCoordinator
+from custom_components.apex.const import DOMAIN
+from custom_components.apex.coordinator import ApexDataUpdateCoordinator
 
 
 def _safe_uid_base(s: str) -> str:
