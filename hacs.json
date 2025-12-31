@@ -1,3 +1,4 @@
 {
-  "name": "Apex Neptune Monitor"
+  "name": "Apex Neptune Monitor",
+  "content_in_root": false
 }
