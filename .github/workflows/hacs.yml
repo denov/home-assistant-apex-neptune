@@ -37,7 +37,7 @@ jobs:
             | jq -r '"tag_name=\(.tag_name)\ntarget_commitish=\(.target_commitish)\ncreated_at=\(.created_at)\npublished_at=\(.published_at)"'
 
       - name: HACS validation
-        uses: "hacs/action@22.5.0"
+        uses: "hacs/action@main"
         with:
           category: "integration"
 
