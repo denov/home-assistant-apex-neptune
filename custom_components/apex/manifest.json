@@ -1,6 +1,6 @@
 {
   "domain": "apex",
-  "name": "Apex Monitor",
+  "name": "Apex Neptune Monitor",
   "codeowners": ["@denov"],
   "config_flow": true,
   "dependencies": [],
