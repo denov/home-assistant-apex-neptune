@@ -13,29 +13,6 @@ jobs:
       - name: Check out the repository
         uses: "actions/checkout@v3"
 
-      - name: Sanity check files + JSON
-        run: |
-          set -euo pipefail
-          echo "Branch: $GITHUB_REF  Sha: $GITHUB_SHA"
-          find . -maxdepth 4 \( -name hacs.json -o -name manifest.json \) -print
-          python - <<'PY'
-          import json, pathlib
-          for p in ["hacs.json", "custom_components/apex/manifest.json"]:
-              raw = pathlib.Path(p).read_text(encoding="utf-8-sig")
-              obj = json.loads(raw)
-              print(p, "=>", type(obj).__name__)
-          PY
-      
-      - name: Show latest GitHub release (what HACS validates if releases exist)
-        run: |
-          echo "repo=${GITHUB_REPOSITORY}"
-          sudo apt-get update
-          sudo apt-get install -y jq
-          curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-               -H "Accept: application/vnd.github+json" \
-               "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest" \
-            | jq -r '"tag_name=\(.tag_name)\ntarget_commitish=\(.target_commitish)\ncreated_at=\(.created_at)\npublished_at=\(.published_at)"'
-
       - name: HACS validation
         uses: "hacs/action@main"
         with:
