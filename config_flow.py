@@ -1,0 +1,206 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+from __future__ import annotations
+
+
+import asyncio
+from datetime import timedelta
+
+import voluptuous as vol
+
+from homeassistant import config_entries
+from homeassistant.core import callback
+from homeassistant.helpers import selector
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+from .const import (
+    DOMAIN,
+    CONF_IP_ADDRESS,
+    CONF_USERNAME,
+    CONF_PASSWORD,
+    DEFAULT_USERNAME,
+    DEFAULT_PASSWORD,
+    CONF_TEMP_UNIT,
+    DEFAULT_TEMP_UNIT,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_SCAN_INTERVAL,
+    CONF_TIMEOUT,
+    DEFAULT_TIMEOUT,
+    CONF_AMPS_DIAGNOSTIC,
+    DEFAULT_AMPS_DIAGNOSTIC,
+    CONF_LINE_VOLTAGE,
+    DEFAULT_LINE_VOLTAGE,
+    # optional:
+    CONF_ENABLE_PER_OUTLET_POWER,
+    DEFAULT_ENABLE_PER_OUTLET_POWER,
+)
+from .coordinator import _parse_status_xml
+
+
+TEMP_UNIT_SELECTOR = selector.SelectSelector(
+    selector.SelectSelectorConfig(
+        options=[
+            selector.SelectOptionDict(value="", label="Auto"),
+            selector.SelectOptionDict(value="F", label="°F"),
+            selector.SelectOptionDict(value="C", label="°C"),
+        ],
+        mode=selector.SelectSelectorMode.DROPDOWN,
+    )
+)
+
+SCAN_INTERVAL_SELECTOR = selector.SelectSelector(
+    selector.SelectSelectorConfig(
+        options=[
+            selector.SelectOptionDict(value="15", label="15 seconds"),
+            selector.SelectOptionDict(value="30", label="30 seconds"),
+            selector.SelectOptionDict(value="60", label="1 minute"),
+            selector.SelectOptionDict(value="120", label="2 minutes"),
+            selector.SelectOptionDict(value="300", label="5 minutes"),
+        ],
+        mode=selector.SelectSelectorMode.DROPDOWN,
+    )
+)
+
+TIMEOUT_SELECTOR = selector.NumberSelector(
+    selector.NumberSelectorConfig(min=3, max=60, step=1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="s")
+)
+
+LINE_VOLTAGE_SELECTOR = selector.NumberSelector(
+    selector.NumberSelectorConfig(min=90, max=260, step=1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="V")
+)
+
+AMPS_DIAGNOSTIC_SELECTOR = selector.BooleanSelector()
+PER_OUTLET_POWER_SELECTOR = selector.BooleanSelector()
+
+
+def _schema_user():
+    return vol.Schema(
+        {
+            vol.Required(CONF_IP_ADDRESS): str,
+            vol.Optional(CONF_USERNAME, default=DEFAULT_USERNAME): str,
+            vol.Optional(CONF_PASSWORD, default=DEFAULT_PASSWORD): str,
+        }
+    )
+
+
+def _schema_confirm(meta: dict):
+    # Read-only info
+    info = []
+    if meta.get("hostname"):
+        info.append(f"Hostname: {meta['hostname']}")
+    if meta.get("serial"):
+        info.append(f"Serial: {meta['serial']}")
+    if meta.get("software"):
+        info.append(f"Software: {meta['software']}")
+    if meta.get("hardware"):
+        info.append(f"Hardware: {meta['hardware']}")
+    description = "\n".join(info) if info else "Connected successfully."
+
+    return vol.Schema({}) , description
+
+
+def _schema_options(merged: dict):
+    return vol.Schema(
+        {
+            vol.Required(CONF_IP_ADDRESS, default=merged.get(CONF_IP_ADDRESS, "")): str,
+            vol.Optional(CONF_USERNAME, default=merged.get(CONF_USERNAME, DEFAULT_USERNAME)): str,
+            vol.Optional(CONF_PASSWORD, default=merged.get(CONF_PASSWORD, DEFAULT_PASSWORD)): str,
+
+            vol.Optional(CONF_TEMP_UNIT, default=merged.get(CONF_TEMP_UNIT, DEFAULT_TEMP_UNIT)): TEMP_UNIT_SELECTOR,
+
+            vol.Optional(CONF_SCAN_INTERVAL, default=str(merged.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL))): SCAN_INTERVAL_SELECTOR,
+            vol.Optional(CONF_TIMEOUT, default=int(merged.get(CONF_TIMEOUT, DEFAULT_TIMEOUT))): TIMEOUT_SELECTOR,
+
+            vol.Optional(CONF_AMPS_DIAGNOSTIC, default=bool(merged.get(CONF_AMPS_DIAGNOSTIC, DEFAULT_AMPS_DIAGNOSTIC))): AMPS_DIAGNOSTIC_SELECTOR,
+
+            vol.Optional(CONF_LINE_VOLTAGE, default=int(merged.get(CONF_LINE_VOLTAGE, DEFAULT_LINE_VOLTAGE))): LINE_VOLTAGE_SELECTOR,
+
+            # optional:
+            vol.Optional(CONF_ENABLE_PER_OUTLET_POWER, default=bool(merged.get(CONF_ENABLE_PER_OUTLET_POWER, DEFAULT_ENABLE_PER_OUTLET_POWER))): PER_OUTLET_POWER_SELECTOR,
+        }
+    )
+
+
+class ApexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    VERSION = 1
+
+    def __init__(self):
+        self._user_input: dict | None = None
+        self._meta: dict = {}
+        self._error: str | None = None
+
+    async def async_step_user(self, user_input=None):
+        self._error = None
+
+        if user_input is not None:
+            ip = user_input[CONF_IP_ADDRESS]
+            await self.async_set_unique_id(ip)
+            self._abort_if_unique_id_configured()
+
+            # Test connection now
+            ok = await self._async_test_connection(user_input)
+            if ok:
+                self._user_input = user_input
+                return await self.async_step_confirm()
+            return self.async_show_form(step_id="user", data_schema=_schema_user(), errors={"base": "cannot_connect"})
+
+        return self.async_show_form(step_id="user", data_schema=_schema_user(), errors={})
+
+    async def async_step_confirm(self, user_input=None):
+        # show a confirmation screen with detected meta
+        if user_input is not None:
+            # Create entry; options left empty (user can configure via "Configure")
+            ip = self._user_input[CONF_IP_ADDRESS] if self._user_input else "Apex"
+            title = f"Apex @ {ip}"
+            return self.async_create_entry(title=title, data=self._user_input or {})
+
+        schema, desc = _schema_confirm(self._meta)
+        return self.async_show_form(
+            step_id="confirm",
+            data_schema=schema,
+            description_placeholders={"info": desc},
+        )
+
+    async def _async_test_connection(self, user_input: dict) -> bool:
+        ip = user_input[CONF_IP_ADDRESS]
+        username = user_input.get(CONF_USERNAME, DEFAULT_USERNAME)
+        password = user_input.get(CONF_PASSWORD, DEFAULT_PASSWORD)
+        url = f"http://{ip}/cgi-bin/status.xml"
+
+        session = async_get_clientsession(self.hass)
+
+        auth = None
+        if password:
+            # only if user set one
+            import aiohttp
+            auth = aiohttp.BasicAuth(username or DEFAULT_USERNAME, password)
+
+        try:
+            timeout = 10
+            async with asyncio.timeout(timeout):
+                async with session.get(url, auth=auth) as resp:
+                    resp.raise_for_status()
+                    txt = await resp.text()
+
+            parsed = _parse_status_xml(txt)
+            self._meta = parsed.get("meta", {}) or {}
+            return True
+        except Exception:
+            self._meta = {}
+            return False
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry):
+        return ApexOptionsFlow(config_entry)
+
+
+class ApexOptionsFlow(config_entries.OptionsFlow):
+    def __init__(self, entry: config_entries.ConfigEntry):
+        self._entry = entry
+
+    async def async_step_init(self, user_input=None):
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        merged = {**self._entry.data, **self._entry.options}
+        return self.async_show_form(step_id="init", data_schema=_schema_options(merged), errors={})

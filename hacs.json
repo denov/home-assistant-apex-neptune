@@ -1,0 +1,8 @@
+{
+  "name": "Apex",
+  "content_in_root": true,
+  "render_readme": true,
+  "domains": ["apex"],
+  "zip_release": true,
+  "filename": "apex.zip"
+}
