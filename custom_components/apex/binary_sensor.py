@@ -45,7 +45,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
             added.add(unique_id)
 
         if new_entities:
-            async_add_entities(new_entities, True)
+            # coordinator data is already fresh; update_before_add would poll the Apex again
+            async_add_entities(new_entities)
 
     _add_new()
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -19,6 +20,9 @@ _LOGGER = logging.getLogger(__name__)
 # status.json reports digital inputs as 0 (OPEN) or 200 (CLOSED); unconnected inputs read OPEN.
 DIGITAL_OPEN = 0
 DIGITAL_CLOSED = 200
+
+# How often to look for status.json again on an Apex that only serves status.xml.
+JSON_RETRY_SECONDS = 3600
 
 
 def _to_number(s: str | None) -> float | None:
@@ -41,18 +45,24 @@ async def async_fetch_status(
     timeout_seconds: int = 10,
     try_json: bool = True,
 ) -> dict[str, Any]:
-    """Fetch status.json, or status.xml on Apex firmware without it (data["source"] says which).
+    """Fetch status.json, or status.xml when status.json isn't usable (data["source"] says which).
 
-    Raises asyncio.TimeoutError, aiohttp.ClientError, ValueError (bad JSON) or ET.ParseError.
+    Older firmware may answer status.json with any HTTP error or a non-JSON page, so those fall
+    back to status.xml. Timeouts and connection errors mean the Apex is unreachable and are raised,
+    as are errors from status.xml: asyncio.TimeoutError, aiohttp.ClientError or ET.ParseError.
+    One timeout covers both requests.
     """
-    if try_json:
-        async with asyncio.timeout(timeout_seconds):
-            async with session.get(f"{base_url}/status.json", auth=auth) as resp:
-                if resp.status != 404:
-                    resp.raise_for_status()
-                    return _parse_status_json(await resp.text())
-
     async with asyncio.timeout(timeout_seconds):
+        if try_json:
+            async with session.get(f"{base_url}/status.json", auth=auth) as resp:
+                if resp.status < 400:
+                    try:
+                        return _parse_status_json(await resp.text())
+                    except ValueError as err:
+                        _LOGGER.debug("Apex status.json is not usable (%s); trying status.xml", err)
+                else:
+                    _LOGGER.debug("Apex status.json returned HTTP %s; trying status.xml", resp.status)
+
         async with session.get(f"{base_url}/status.xml", auth=auth) as resp:
             resp.raise_for_status()
             return _parse_status_xml(await resp.text())
@@ -77,7 +87,11 @@ class ApexDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.username = username or ""
         self.password = password or ""
         self.timeout_seconds = timeout_seconds
-        self._json_supported = True
+        # Stop asking for status.json only on an Apex where it has never worked,
+        # and even then look again occasionally (e.g. after a firmware update).
+        self._json_seen = False
+        self._json_retry_at: float | None = None
+        self._json_failing = False
 
         super().__init__(
             hass,
@@ -93,23 +107,36 @@ class ApexDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.password:
             auth = aiohttp.BasicAuth(self.username or "admin", self.password)
 
+        try_json = self._json_retry_at is None or time.monotonic() >= self._json_retry_at
+
         try:
             data = await async_fetch_status(
                 session,
                 self.base_url,
                 auth=auth,
                 timeout_seconds=self.timeout_seconds,
-                try_json=self._json_supported,
+                try_json=try_json,
             )
-        except (asyncio.TimeoutError, aiohttp.ClientError, ValueError, ET.ParseError) as err:
+        except (asyncio.TimeoutError, aiohttp.ClientError, ET.ParseError) as err:
             raise UpdateFailed(f"Error fetching/parsing Apex status: {err}") from err
         except Exception as err:
             raise UpdateFailed(f"Unexpected error updating Apex data: {err}") from err
 
-        if self._json_supported and data["source"] == "xml":
-            # don't ask for status.json again every poll
-            _LOGGER.info("Apex has no status.json; using status.xml (digital inputs not available)")
-            self._json_supported = False
+        if data["source"] == "json":
+            if self._json_failing:
+                _LOGGER.info("Apex status.json is back; digital inputs available again")
+            self._json_seen = True
+            self._json_failing = False
+            self._json_retry_at = None
+        elif try_json and self._json_seen:
+            # worked before: a hiccup, not old firmware; keep asking every poll
+            if not self._json_failing:
+                _LOGGER.warning("Apex status.json failed; digital inputs unavailable until it recovers")
+            self._json_failing = True
+        elif try_json:
+            if self._json_retry_at is None:
+                _LOGGER.info("Apex has no usable status.json; using status.xml (digital inputs not available)")
+            self._json_retry_at = time.monotonic() + JSON_RETRY_SECONDS
 
         return data
 
