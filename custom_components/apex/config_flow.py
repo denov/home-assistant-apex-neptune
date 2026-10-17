@@ -35,27 +35,18 @@ CONNECTION_KEYS = (CONF_IP_ADDRESS, CONF_USERNAME, CONF_PASSWORD)
 # never sent back to the browser: an empty field keeps the stored password
 PASSWORD_SELECTOR = selector.TextSelector(selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD))
 
+# option labels are in translations/en.json under "selector"
 TEMP_UNIT_SELECTOR = selector.SelectSelector(
     selector.SelectSelectorConfig(
-        options=[
-            selector.SelectOptionDict(value="", label="Auto"),
-            selector.SelectOptionDict(value="F", label="°F"),
-            selector.SelectOptionDict(value="C", label="°C"),
-        ],
-        mode=selector.SelectSelectorMode.DROPDOWN,
+        options=["auto", "f", "c"], mode=selector.SelectSelectorMode.DROPDOWN, translation_key="temp_unit"
     )
 )
 
 SCAN_INTERVAL_SELECTOR = selector.SelectSelector(
     selector.SelectSelectorConfig(
-        options=[
-            selector.SelectOptionDict(value="15", label="15 seconds"),
-            selector.SelectOptionDict(value="30", label="30 seconds"),
-            selector.SelectOptionDict(value="60", label="1 minute"),
-            selector.SelectOptionDict(value="120", label="2 minutes"),
-            selector.SelectOptionDict(value="300", label="5 minutes"),
-        ],
+        options=["15", "30", "60", "120", "300"],
         mode=selector.SelectSelectorMode.DROPDOWN,
+        translation_key="scan_interval",
     )
 )
 
@@ -87,13 +78,9 @@ def _schema_user() -> vol.Schema:
     )
 
 
-def _confirm_description(meta: dict[str, Any]) -> str:
-    info = [
-        f"{label}: {meta[key]}"
-        for key, label in (("hostname", "Hostname"), ("serial", "Serial"), ("software", "Software"), ("hardware", "Hardware"))
-        if meta.get(key)
-    ]
-    return "\n".join(info) if info else "Connected successfully."
+def _confirm_placeholders(meta: dict[str, Any]) -> dict[str, str]:
+    """What the confirm step shows (its text is in translations/en.json); "-" for what the Apex didn't report."""
+    return {key: str(meta.get(key) or "-") for key in ("hostname", "serial", "software", "hardware")}
 
 
 def _schema_options(s: ApexSettings) -> vol.Schema:
@@ -176,7 +163,7 @@ class ApexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="confirm",
             data_schema=vol.Schema({}),
-            description_placeholders={"info": _confirm_description(self._meta)},
+            description_placeholders=_confirm_placeholders(self._meta),
         )
 
     @staticmethod

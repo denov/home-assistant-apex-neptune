@@ -53,7 +53,7 @@ def probe_type(probe_type: str | None, probe_name: str | None) -> ProbeType | No
 
 
 def temp_unit(value: float | None, configured: str) -> str:
-    # configured: "F" | "C" | "" (auto)
+    # configured: "f", "c" or "auto"
     c = (configured or "").strip().upper()
     if c == "C":
         return "°C"

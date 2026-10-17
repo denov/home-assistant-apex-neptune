@@ -13,7 +13,7 @@ CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 
 # Options / advanced settings
-CONF_TEMP_UNIT = "temp_unit"                # "", "F", "C"
+CONF_TEMP_UNIT = "temp_unit"                # "auto", "f", "c"
 CONF_SCAN_INTERVAL = "scan_interval"        # seconds (stored as string in options UI)
 CONF_TIMEOUT = "timeout"                    # seconds
 CONF_AMPS_DIAGNOSTIC = "amps_diagnostic"    # bool (mark Amp_* as diagnostic)
@@ -26,7 +26,7 @@ CONF_READ_ONLY = "read_only"                # bool: monitor only, never change t
 DEFAULT_USERNAME = "admin"
 DEFAULT_PASSWORD = ""
 
-DEFAULT_TEMP_UNIT = ""          # auto
+DEFAULT_TEMP_UNIT = "auto"
 DEFAULT_SCAN_INTERVAL = 30      # seconds
 DEFAULT_TIMEOUT = 10            # seconds
 DEFAULT_AMPS_DIAGNOSTIC = True  # keep Current/Amp_* under Diagnostic by default
@@ -56,7 +56,8 @@ class ApexSettings:
             host=d[CONF_IP_ADDRESS],
             username=d.get(CONF_USERNAME) or DEFAULT_USERNAME,
             password=d.get(CONF_PASSWORD) or DEFAULT_PASSWORD,
-            temp_unit=d.get(CONF_TEMP_UNIT, DEFAULT_TEMP_UNIT),
+            # older versions saved "", "F" or "C"
+            temp_unit=(d.get(CONF_TEMP_UNIT) or DEFAULT_TEMP_UNIT).lower(),
             scan_interval=int(d.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)),
             timeout=int(d.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)),
             amps_diagnostic=bool(d.get(CONF_AMPS_DIAGNOSTIC, DEFAULT_AMPS_DIAGNOSTIC)),

@@ -23,6 +23,7 @@ from custom_components.apex.const import (
     CONF_IP_ADDRESS,
     CONF_PASSWORD,
     CONF_READ_ONLY,
+    CONF_TEMP_UNIT,
     CONF_USERNAME,
     DOMAIN,
 )
@@ -456,3 +457,77 @@ async def test_password_sent_when_status_needs_it(hass: HomeAssistant, aioclient
     # from then on, straight away
     await entry.runtime_data.coordinator.async_refresh()
     assert sent[3:] == [auth]
+
+
+async def test_firmware_install_finishes_when_the_version_changes(
+    hass: HomeAssistant, aioclient_mock, monkeypatch
+) -> None:
+    config = json.loads(load_fixture("rest_config.json"))
+    config["nconf"]["latestFirmware"] = "5.16_1A27"
+    aioclient_mock.get(f"{HOST_URL}/rest/config", text=json.dumps(config))
+
+    def updated(istat):
+        istat["software"] = "5.16_1A27"
+
+    async def install(method, url, data):
+        # the Apex comes back on the new version
+        aioclient_mock.clear_requests()
+        aioclient_mock.get(f"{BASE_URL}/status.json", text=_status_json(updated))
+        _mock_rest(aioclient_mock)
+        return AiohttpClientMockResponse(method, url, json=OK)
+
+    aioclient_mock.put(f"{HOST_URL}/rest/config/nconf", side_effect=install)
+    await _setup(hass, aioclient_mock)
+    monkeypatch.setattr("custom_components.apex.update.INSTALL_POLL_SECONDS", 0)
+    fw = _state(hass, "update", f"{UID_BASE}_firmware")
+    assert fw.state == STATE_ON
+
+    entity = hass.data["entity_components"]["update"].get_entity(fw.entity_id)
+    await entity.async_install(None, False)
+    await hass.async_block_till_done()
+
+    fw = _state(hass, "update", f"{UID_BASE}_firmware")
+    assert fw.attributes["installed_version"] == "5.16_1A27"
+    assert fw.attributes["in_progress"] is False
+
+
+async def test_output_without_a_device_id(hass: HomeAssistant, aioclient_mock) -> None:
+    def no_did(istat):
+        for o in istat["outputs"]:
+            if o["did"] == "2_2":
+                del o["did"]
+
+    await _setup(hass, aioclient_mock, status=_status_json(no_did))
+    entity_id = _entity_id(hass, "switch", f"{UID_BASE}_outlet_9")
+    with pytest.raises(HomeAssistantError, match="device id"):
+        await hass.services.async_call(SWITCH_DOMAIN, SERVICE_TURN_OFF, {ATTR_ENTITY_ID: entity_id}, blocking=True)
+    assert _puts(aioclient_mock) == []
+
+
+@pytest.mark.parametrize(("saved", "unit"), [("F", "°F"), ("C", "°C"), ("", "°F"), ("c", "°C")])
+async def test_temp_unit_saved_by_older_versions(hass: HomeAssistant, aioclient_mock, saved, unit) -> None:
+    await _setup(hass, aioclient_mock, password="", rest=False, options={CONF_TEMP_UNIT: saved})
+    entity = hass.data["entity_components"]["sensor"].get_entity(_entity_id(hass, "sensor", f"{UID_BASE}_tmp"))
+    # what the Apex reports in, before Home Assistant converts it to the unit system
+    assert entity.native_unit_of_measurement == unit
+
+
+# --- diagnostics --------------------------------------------------------------
+
+
+async def test_diagnostics_redact_credentials(hass: HomeAssistant, aioclient_mock) -> None:
+    from custom_components.apex.diagnostics import async_get_config_entry_diagnostics
+
+    entry = await _setup(hass, aioclient_mock)
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diag["rest_api"] is True
+    assert diag["data"]["source"] == "json"
+    assert diag["data"]["probes"]["Tmp"]["value"] == 78.6
+    assert diag["entry"]["data"][CONF_PASSWORD] == "**REDACTED**"
+    nconf = diag["data"]["config"]["nconf"]
+    assert nconf["password"] == nconf["emailUser"] == nconf["ipaddr"] == "**REDACTED**"
+    assert nconf["latestFirmware"] == "5.15_6B26"
+    text = json.dumps(diag, default=str)
+    for secret in ("secret", "AC5:12345", APEX_IP, "name@example.com", "mail.example.com"):
+        assert secret not in text

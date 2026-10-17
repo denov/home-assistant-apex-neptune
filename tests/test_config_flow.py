@@ -36,7 +36,7 @@ async def test_create_entry(hass: HomeAssistant, aioclient_mock) -> None:
     result = await hass.config_entries.flow.async_configure(result["flow_id"], USER_INPUT)
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "confirm"
-    assert "Serial: AC5:12345" in result["description_placeholders"]["info"]
+    assert result["description_placeholders"]["serial"] == "AC5:12345"
 
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
     await hass.async_block_till_done()
@@ -66,7 +66,7 @@ async def test_create_entry_xml_only_apex(hass: HomeAssistant, aioclient_mock) -
     result = await _start(hass)
     result = await hass.config_entries.flow.async_configure(result["flow_id"], USER_INPUT)
     assert result["step_id"] == "confirm"
-    assert "Serial: AC5:12345" in result["description_placeholders"]["info"]
+    assert result["description_placeholders"]["serial"] == "AC5:12345"
 
 
 async def test_cannot_connect(hass: HomeAssistant, aioclient_mock) -> None:
