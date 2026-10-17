@@ -7,12 +7,8 @@ from typing import Any
 
 from homeassistant.components.update import UpdateDeviceClass, UpdateEntity, UpdateEntityFeature
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.device_registry import DeviceInfo
 
-from custom_components.apex.const import DOMAIN
-from custom_components.apex.coordinator import ApexDataUpdateCoordinator
-from custom_components.apex.entity import ApexEntity, async_apex_command
-from custom_components.apex.rest import ApexRestClient
+from .entity import ApexConfigEntry, ApexEntity, ApexRuntimeData, async_apex_command, no_control_reason
 
 # The Apex stops answering while it installs; its own UI just waits. Give up after this long.
 INSTALL_TIMEOUT_SECONDS = 600
@@ -26,13 +22,12 @@ def aos_version(software: str | None) -> str | None:
     return software.replace("L", "").strip() or None
 
 
-async def async_setup_entry(hass, entry, async_add_entities):
-    ctx = hass.data[DOMAIN][entry.entry_id]
-    if ctx.get("rest") is None:
+async def async_setup_entry(hass, entry: ApexConfigEntry, async_add_entities):
+    data = entry.runtime_data
+    if data.rest is None:
         # the latest version is in the config, which needs the password
         return
-    coordinator: ApexDataUpdateCoordinator = ctx["coordinator"]
-    async_add_entities([ApexFirmwareUpdate(coordinator, ctx["device"], ctx["uid_base"], ctx.get("control"))])
+    async_add_entities([ApexFirmwareUpdate(data)])
 
 
 class ApexFirmwareUpdate(ApexEntity, UpdateEntity):
@@ -40,16 +35,11 @@ class ApexFirmwareUpdate(ApexEntity, UpdateEntity):
 
     _attr_device_class = UpdateDeviceClass.FIRMWARE
 
-    def __init__(
-        self,
-        coordinator: ApexDataUpdateCoordinator,
-        device_info: DeviceInfo,
-        uid_base: str,
-        rest: ApexRestClient | None,
-    ):
-        super().__init__(coordinator, device_info, f"{uid_base}_firmware", "Firmware")
-        self._rest = rest
-        if rest is not None:
+    def __init__(self, data: ApexRuntimeData):
+        super().__init__(data, "firmware", "Firmware")
+        self._rest = data.control
+        self._read_only = data.settings.read_only
+        if self._rest is not None:
             # read-only installs can see an update but not start it
             self._attr_supported_features = UpdateEntityFeature.INSTALL | UpdateEntityFeature.PROGRESS
 
@@ -70,7 +60,7 @@ class ApexFirmwareUpdate(ApexEntity, UpdateEntity):
 
     async def async_install(self, version: str | None, backup: bool, **kwargs: Any) -> None:
         if self._rest is None:
-            raise HomeAssistantError("The Apex integration is read-only or has no password")
+            raise HomeAssistantError(no_control_reason(self._read_only))
         before = self.installed_version
         await async_apex_command(self.coordinator, "start the firmware update", self._rest.async_update_firmware())
 

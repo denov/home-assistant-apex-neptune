@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 
+import aiohttp
 import pytest
+from yarl import URL
 from homeassistant.components.select import DOMAIN as SELECT_DOMAIN, SERVICE_SELECT_OPTION
 from homeassistant.components.switch import DOMAIN as SWITCH_DOMAIN, SERVICE_TURN_OFF, SERVICE_TURN_ON
 from homeassistant.const import ATTR_ENTITY_ID, STATE_OFF, STATE_ON
@@ -13,6 +15,7 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util.unit_system import METRIC_SYSTEM, US_CUSTOMARY_SYSTEM
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMockResponse
 
 from custom_components.apex import coordinator as coordinator_module
 from custom_components.apex.const import (
@@ -157,7 +160,7 @@ async def test_rejected_login_backs_off(hass: HomeAssistant, aioclient_mock) -> 
 
     # monitoring still works
     assert float(_state(hass, "sensor", f"{UID_BASE}_tmp").state) == 78.6
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator = entry.runtime_data.coordinator
     await coordinator.async_refresh()
     await coordinator.async_refresh()
     assert len(_calls(aioclient_mock, "POST", "/rest/login")) == 1
@@ -165,7 +168,7 @@ async def test_rejected_login_backs_off(hass: HomeAssistant, aioclient_mock) -> 
 
 async def test_extras_refresh_slowly(hass: HomeAssistant, aioclient_mock, monkeypatch) -> None:
     entry = await _setup(hass, aioclient_mock)
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator = entry.runtime_data.coordinator
 
     await coordinator.async_refresh()
     assert len(_calls(aioclient_mock, "GET", "/rest/config")) == 1
@@ -412,3 +415,44 @@ async def test_two_apexes_keep_their_own_services(hass: HomeAssistant, aioclient
     entity_id = _entity_id(hass, "select", "ac5_99999_outlet_9_mode")
     await hass.services.async_call(DOMAIN, "set_output", {ATTR_ENTITY_ID: entity_id, "setting": "AUTO"}, blocking=True)
     assert [str(c[1]) for c in aioclient_mock.mock_calls if c[0] == "PUT"] == ["http://5.6.7.8/rest/status/outputs/2_2"]
+
+
+# --- status page login -------------------------------------------------------
+
+
+def _record_status_auth(aioclient_mock, monkeypatch, *, required: bool) -> list:
+    """The auth sent with each status page request; with required, the Apex answers 401 without it."""
+    sent: list = []
+    match = aioclient_mock.match_request
+
+    async def spy(method, url, *, auth=None, **kwargs):
+        if "/cgi-bin/" in str(url):
+            sent.append(auth)
+            if required and auth is None:
+                return AiohttpClientMockResponse(method, URL(url), status=401)
+        return await match(method, url, auth=auth, **kwargs)
+
+    # before the first request creates the session that binds it
+    monkeypatch.setattr(aioclient_mock, "match_request", spy)
+    return sent
+
+
+async def test_status_is_read_without_the_password(hass: HomeAssistant, aioclient_mock, monkeypatch) -> None:
+    """Status pages are plain HTTP: don't send the password when the Apex doesn't ask for it."""
+    sent = _record_status_auth(aioclient_mock, monkeypatch, required=False)
+    entry = await _setup(hass, aioclient_mock)
+    await entry.runtime_data.coordinator.async_refresh()
+    assert sent == [None, None]
+
+
+async def test_password_sent_when_status_needs_it(hass: HomeAssistant, aioclient_mock, monkeypatch) -> None:
+    sent = _record_status_auth(aioclient_mock, monkeypatch, required=True)
+    entry = await _setup(hass, aioclient_mock)
+    assert float(_state(hass, "sensor", f"{UID_BASE}_tmp").state) == 78.6
+
+    # status.json, then status.xml without it; status.json with it
+    auth = aiohttp.BasicAuth("admin", "secret")
+    assert sent == [None, None, auth]
+    # from then on, straight away
+    await entry.runtime_data.coordinator.async_refresh()
+    assert sent[3:] == [auth]

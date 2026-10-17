@@ -4,51 +4,25 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
-from homeassistant.helpers.device_registry import DeviceInfo
 
-from custom_components.apex.const import DOMAIN
-from custom_components.apex.coordinator import ApexDataUpdateCoordinator
-from custom_components.apex.entity import ApexEntity
+from .entity import ApexConfigEntry, ApexEntity, ApexRuntimeData, async_add_discovered, is_on_state
 
 # a status[2] that isn't an error (DOS and pumps report e.g. "Volt" there when something is wrong)
 OUTPUT_OK = (None, "", "OK")
 
 
-async def async_setup_entry(hass, entry, async_add_entities):
-    ctx = hass.data[DOMAIN][entry.entry_id]
-    coordinator: ApexDataUpdateCoordinator = ctx["coordinator"]
-    uid_base: str = ctx["uid_base"]
-    device: DeviceInfo = ctx["device"]
+async def async_setup_entry(hass, entry: ApexConfigEntry, async_add_entities):
+    data = entry.runtime_data
 
-    added: set[str] = set()
-
-    def _add_new():
-        data = coordinator.data or {}
-        inputs_now = data.get("inputs", {}) or {}
-        new_entities: list[BinarySensorEntity] = []
-
-        for did in sorted(inputs_now):
-            unique_id = f"{uid_base}_input_{did}".lower()
-            if unique_id in added:
-                continue
-            label = inputs_now[did].get("name") or did
-            new_entities.append(ApexDigitalInput(coordinator, device, unique_id, label, did))
-            added.add(unique_id)
-
+    def discover(d: dict[str, Any]):
+        inputs = d.get("inputs", {}) or {}
+        for did in sorted(inputs):
+            yield f"input_{did}", lambda did=did: ApexDigitalInput(data, did, inputs[did].get("name") or did)
         # status.json reports output types; status.xml doesn't, so no alert outputs to watch there
-        alarm = ApexAlarm(coordinator, device, f"{uid_base}_alarm")
-        if alarm.unique_id not in added and any(o.get("type") for o in data.get("outlets", []) or []):
-            new_entities.append(alarm)
-            added.add(alarm.unique_id)
+        if any(o.get("type") for o in d.get("outlets", []) or []):
+            yield "alarm", lambda: ApexAlarm(data)
 
-        if new_entities:
-            # coordinator data is already fresh; update_before_add would poll the Apex again
-            async_add_entities(new_entities)
-
-    _add_new()
-
-    remove = coordinator.async_add_listener(_add_new)
-    entry.async_on_unload(remove)
+    async_add_discovered(entry, async_add_entities, discover)
 
 
 class ApexDigitalInput(ApexEntity, BinarySensorEntity):
@@ -58,15 +32,8 @@ class ApexDigitalInput(ApexEntity, BinarySensorEntity):
     pick one (moisture, problem, ...) and can invert it with a template if needed.
     """
 
-    def __init__(
-        self,
-        coordinator: ApexDataUpdateCoordinator,
-        device_info: DeviceInfo,
-        unique_id: str,
-        name: str,
-        did: str,
-    ):
-        super().__init__(coordinator, device_info, unique_id, name)
+    def __init__(self, data: ApexRuntimeData, did: str, name: str):
+        super().__init__(data, f"input_{did}", name)
         self._did = did
 
     def _input(self) -> dict:
@@ -85,7 +52,7 @@ class ApexDigitalInput(ApexEntity, BinarySensorEntity):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.data is not None and bool(self._input())
+        return super().available and bool(self._input())
 
     @property
     def extra_state_attributes(self):
@@ -107,8 +74,8 @@ class ApexAlarm(ApexEntity, BinarySensorEntity):
 
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
 
-    def __init__(self, coordinator: ApexDataUpdateCoordinator, device_info: DeviceInfo, unique_id: str):
-        super().__init__(coordinator, device_info, unique_id, "Alarm")
+    def __init__(self, data: ApexRuntimeData):
+        super().__init__(data, "alarm", "Alarm")
 
     def _outputs(self) -> list[dict[str, Any]]:
         return (self.coordinator.data or {}).get("outlets", []) or []
@@ -117,7 +84,7 @@ class ApexAlarm(ApexEntity, BinarySensorEntity):
         return [
             o["name"]
             for o in self._outputs()
-            if (o.get("type") or "").lower() == "alert" and (o.get("state") or "").upper() in ("ON", "AON")
+            if (o.get("type") or "").lower() == "alert" and is_on_state(o.get("state"))
         ]
 
     def _output_errors(self) -> dict[str, str]:

@@ -2,10 +2,65 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, NamedTuple
+
+from homeassistant.components.sensor import SensorDeviceClass
+from homeassistant.const import (
+    UnitOfElectricCurrent,
+    UnitOfElectricPotential,
+    UnitOfLength,
+    UnitOfPower,
+)
 
 _RE_UNDERSCORE_NUM = re.compile(r"^(?P<base>[A-Za-z]+)_(?P<num>\d+)$")                 # Amp_14
 _RE_TRAILING = re.compile(r"^(?P<base>[A-Za-z]+)(?:(?P<module>x\d+)|(?P<num>\d+))$")  # Tmp2, Alkx5, pHx8
+
+
+class ProbeType(NamedTuple):
+    label: str
+    icon: str
+    unit: str | None = None
+    device_class: SensorDeviceClass | None = None
+
+
+# by the probe type the Apex reports (lowercased)
+PROBE_TYPES: dict[str, ProbeType] = {
+    # the unit comes from temp_unit()
+    "temp": ProbeType("Temp", "mdi:thermometer", None, SensorDeviceClass.TEMPERATURE),
+    "ph": ProbeType("pH", "mdi:ph"),
+    "amps": ProbeType("Current", "mdi:current-ac", UnitOfElectricCurrent.AMPERE, SensorDeviceClass.CURRENT),
+    "cond": ProbeType("Conductivity", "mdi:flash"),
+    # a cond probe named Salt...
+    "salt": ProbeType("Salinity", "mdi:shaker-outline", "ppt"),
+    "alk": ProbeType("Alkalinity", "mdi:test-tube", "dKH"),
+    "ca": ProbeType("Calcium", "mdi:flask", "ppm"),
+    "mg": ProbeType("Magnesium", "mdi:flask-outline", "ppm"),
+    "orp": ProbeType("ORP", "mdi:test-tube", UnitOfElectricPotential.MILLIVOLT),
+    "pwr": ProbeType("Power", "mdi:flash", UnitOfPower.WATT, SensorDeviceClass.POWER),
+    "volts": ProbeType("Voltage", "mdi:sine-wave", UnitOfElectricPotential.VOLT, SensorDeviceClass.VOLTAGE),
+    # liquid level sensor (LLS) set to inches
+    "in": ProbeType("Level", "mdi:waves-arrow-up", UnitOfLength.INCHES, SensorDeviceClass.DISTANCE),
+    # flow sensor; no device class, since older Home Assistant doesn't know gal/h
+    "gph": ProbeType("Flow", "mdi:waves-arrow-right", "gal/h"),
+}
+
+
+def probe_type(probe_type: str | None, probe_name: str | None) -> ProbeType | None:
+    t = (probe_type or "").strip().lower()
+    if t == "cond" and (probe_name or "").strip().lower().startswith("salt"):
+        t = "salt"
+    return PROBE_TYPES.get(t)
+
+
+def temp_unit(value: float | None, configured: str) -> str:
+    # configured: "F" | "C" | "" (auto)
+    c = (configured or "").strip().upper()
+    if c == "C":
+        return "°C"
+    if c == "F":
+        return "°F"
+    # heuristic: allow mixed °F/°C probes
+    return "°C" if (value is not None and value <= 45) else "°F"
 
 
 def split_probe_name(name: str) -> tuple[str, str | None, str | None]:
@@ -20,88 +75,43 @@ def split_probe_name(name: str) -> tuple[str, str | None, str | None]:
     return name, None, None
 
 
-def pretty_type(probe_name: str, probe_type: str) -> str:
-    t = (probe_type or "").strip().lower()
-    n = (probe_name or "").strip().lower()
-
-    if t == "temp":
-        return "Temp"
-    if t == "ph":
-        return "pH"
-    if t == "amps":
-        return "Current"
-    if t == "cond":
-        return "Salinity" if n.startswith("salt") else "Conductivity"
-    if t == "alk":
-        return "Alkalinity"
-    if t == "ca":
-        return "Calcium"
-    if t == "mg":
-        return "Magnesium"
-    if t == "orp":
-        return "ORP"
-    if t == "pwr":
-        return "Power"
-    if t == "volts":
-        return "Voltage"
-    if t == "in":
-        return "Level"
-    if t == "gph":
-        return "Flow"
-
-    return probe_type.strip() if probe_type else probe_name
+def pretty_type(probe_name: str, probe_type_name: str) -> str:
+    info = probe_type(probe_type_name, probe_name)
+    if info:
+        return info.label
+    return probe_type_name.strip() if probe_type_name else probe_name
 
 
-def build_labels(
-    probes: dict[str, dict[str, Any]],
-    overrides: dict[str, tuple[str, str | None]],
-) -> dict[str, str]:
+def build_labels(probes: dict[str, dict[str, Any]]) -> dict[str, str]:
     base_for: dict[str, str] = {}
     suffix_for: dict[str, str] = {}
+    is_amps: dict[str, bool] = {}
 
     for probe_name, p in probes.items():
-        if overrides and probe_name in overrides:
-            base_for[probe_name] = overrides[probe_name][0]
-            suffix_for[probe_name] = ""
-            continue
-
         typ = (p.get("type") or "").strip()
-        base = pretty_type(probe_name, typ)
-
         _, num, module = split_probe_name(probe_name)
-        if typ.strip().lower() == "amps":
-            suffix = num or module or ""
-        else:
-            suffix = module or num or ""
-
-        base_for[probe_name] = base
-        suffix_for[probe_name] = suffix
+        is_amps[probe_name] = typ.lower() == "amps"
+        base_for[probe_name] = pretty_type(probe_name, typ)
+        suffix_for[probe_name] = (num or module or "") if is_amps[probe_name] else (module or num or "")
 
     counts: dict[str, int] = {}
-    for base in base_for.values():
-        counts[base] = counts.get(base, 0) + 1
     # probes that would get the very same label
     unsuffixed: dict[str, int] = {}
     for probe_name, base in base_for.items():
-        if not suffix_for.get(probe_name):
+        counts[base] = counts.get(base, 0) + 1
+        if not suffix_for[probe_name]:
             unsuffixed[base] = unsuffixed.get(base, 0) + 1
 
     labels: dict[str, str] = {}
     for probe_name, base in base_for.items():
-        if overrides and probe_name in overrides:
-            labels[probe_name] = overrides[probe_name][0]
-            continue
-
-        typ = (probes.get(probe_name, {}).get("type") or "").strip().lower()
-        suffix = suffix_for.get(probe_name) or ""
-
-        if typ == "amps" and suffix:
+        suffix = suffix_for[probe_name]
+        if is_amps[probe_name] and suffix:
             labels[probe_name] = f"{base} {suffix}"
-        elif counts.get(base, 0) > 1 and suffix:
+        elif counts[base] > 1 and suffix:
             labels[probe_name] = f"{base} ({suffix})" if suffix.startswith("x") else f"{base} {suffix}"
         elif unsuffixed.get(base, 0) > 1:
             # e.g. per-outlet power on an EB832 ("Return_2_3W"): the Apex name is the best label
-            labels[probe_name] = probes.get(probe_name, {}).get("name") or probe_name
+            labels[probe_name] = probes[probe_name].get("name") or probe_name
         else:
             labels[probe_name] = base
 
@@ -111,3 +121,8 @@ def build_labels(
 def safe_uid_base(s: str) -> str:
     # keep stable unique_ids even if serial has ":" etc.
     return re.sub(r"[^a-z0-9_]+", "_", (s or "").lower()).strip("_")
+
+
+def apex_uid(meta: dict[str, Any], host: str) -> str:
+    """The Apex's id for unique_ids: its serial, or the host when it doesn't report one."""
+    return safe_uid_base(meta.get("serial") or "") or safe_uid_base(host)

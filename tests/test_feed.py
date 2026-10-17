@@ -128,12 +128,12 @@ async def test_no_feed_mode_sensor_on_xml_only_apex(hass: HomeAssistant, aioclie
 async def test_feed_mode_updates_right_after_press(hass: HomeAssistant, aioclient_mock) -> None:
     aioclient_mock.post(f"{HOST_URL}/rest/login", json={"connect.sid": "sid-1"})
     aioclient_mock.put(f"{HOST_URL}/rest/status/feed/1", json={"name": 1, "active": 1, "errorCode": 0})
-    await _setup(hass, aioclient_mock)
+    entry = await _setup(hass, aioclient_mock)
     sensor = _entity_id(hass, "sensor", f"{UID_BASE}_feed_mode")
     assert hass.states.get(sensor).state == "Off"
 
     # a refresh was just requested (as during startup), so a debounced one would wait
-    await hass.data[DOMAIN][next(iter(hass.data[DOMAIN]))]["coordinator"].async_request_refresh()
+    await entry.runtime_data.coordinator.async_request_refresh()
     aioclient_mock.clear_requests()
     aioclient_mock.post(f"{HOST_URL}/rest/login", json={"connect.sid": "sid-1"})
     aioclient_mock.put(f"{HOST_URL}/rest/status/feed/1", json={"name": 1, "active": 1, "errorCode": 0})
@@ -152,8 +152,8 @@ async def test_feed_ends_sensor(hass: HomeAssistant, aioclient_mock, freezer) ->
 
     start = dt_util.utcnow().replace(microsecond=0)
     freezer.move_to(start)
-    await _setup(hass, aioclient_mock, password="", status=_status_json({"name": 1, "active": 300}))
-    coordinator = hass.data[DOMAIN][next(iter(hass.data[DOMAIN]))]["coordinator"]
+    entry = await _setup(hass, aioclient_mock, password="", status=_status_json({"name": 1, "active": 300}))
+    coordinator = entry.runtime_data.coordinator
     sensor = _entity_id(hass, "sensor", f"{UID_BASE}_feed_ends")
     ends = start + timedelta(seconds=300)
 

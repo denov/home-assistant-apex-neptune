@@ -44,12 +44,16 @@
           "read_only": "Read-only"
         },
         "data_description": {
-          "password": "Needed to control outputs and feed cycles, and for Trident levels and firmware updates.",
+          "password": "Leave blank to keep the current password. Needed to control outputs and feed cycles, and for Trident levels and firmware updates.",
           "line_voltage": "Used for Total Power (total current × voltage). 120 in North America, 230 in most other places.",
           "enable_per_outlet_power": "Adds an energy (kWh) sensor for each outlet on an energy bar that reports watts (EB832).",
           "read_only": "Monitor only: no control entities or actions, even with a password."
         }
       }
+    },
+    "error": {
+      "cannot_connect": "Couldn't reach the Apex. Check the host or IP address.",
+      "invalid_auth": "The Apex rejected the username or password."
     }
   },
   "entity": {

@@ -57,7 +57,7 @@ class ApexRestClient:
     ) -> None:
         self._session = session
         self._host_url = host_url.rstrip("/")
-        self._username = username or "admin"
+        self._username = username
         self._password = password
         self._timeout = timeout_seconds
         self._sid: str | None = None

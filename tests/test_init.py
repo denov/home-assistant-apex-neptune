@@ -75,7 +75,7 @@ async def test_input_state_follows_apex(hass: HomeAssistant, aioclient_mock) -> 
     aioclient_mock.get(f"{BASE_URL}/status.json", text=load_fixture("status.json"))
     entry = _entry()
     await _setup(hass, entry)
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator = entry.runtime_data.coordinator
 
     doc = json.loads(load_fixture("status.json"))
     for i in doc["istat"]["inputs"]:
@@ -104,7 +104,7 @@ async def test_falls_back_to_status_xml(hass: HomeAssistant, aioclient_mock) -> 
     assert _entities(hass, entry, "binary_sensor") == []
 
     # status.json isn't requested again once it's known to be missing
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator = entry.runtime_data.coordinator
     xml_before = _requested(aioclient_mock, "status.xml")
     await coordinator.async_refresh()
     await hass.async_block_till_done()
@@ -146,7 +146,7 @@ async def test_status_json_hiccup_is_not_permanent(hass: HomeAssistant, aioclien
     aioclient_mock.get(f"{BASE_URL}/status.json", text=load_fixture("status.json"))
     entry = _entry()
     await _setup(hass, entry)
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator = entry.runtime_data.coordinator
     sw1 = f"{UID_BASE}_input_base_i1"
 
     aioclient_mock.clear_requests()
@@ -176,7 +176,7 @@ async def test_xml_only_apex_checks_for_status_json_hourly(
     aioclient_mock.get(f"{BASE_URL}/status.xml", text=load_fixture("status.xml"))
     entry = _entry()
     await _setup(hass, entry)
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator = entry.runtime_data.coordinator
     json_before = _requested(aioclient_mock, "status.json")
 
     now += coordinator_module.JSON_RETRY_SECONDS - 1
@@ -200,4 +200,62 @@ async def test_unload(hass: HomeAssistant, aioclient_mock) -> None:
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.NOT_LOADED
-    assert entry.entry_id not in hass.data[DOMAIN]
+
+
+async def test_entities_unavailable_after_failed_polls(hass: HomeAssistant, aioclient_mock) -> None:
+    """One failed poll keeps the last readings; a few in a row don't pass them off as current."""
+    aioclient_mock.get(f"{BASE_URL}/status.json", text=load_fixture("status.json"))
+    entry = _entry()
+    await _setup(hass, entry)
+    coordinator = entry.runtime_data.coordinator
+    tmp = f"{UID_BASE}_tmp"
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{BASE_URL}/status.json", exc=aiohttp.ClientError("unreachable"))
+    for _ in range(coordinator_module.UNAVAILABLE_AFTER_FAILURES - 1):
+        await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert float(_state(hass, "sensor", tmp).state) == 78.6
+
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert _state(hass, "sensor", tmp).state == STATE_UNAVAILABLE
+    assert _state(hass, "binary_sensor", f"{UID_BASE}_input_base_i1").state == STATE_UNAVAILABLE
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{BASE_URL}/status.json", text=load_fixture("status.json"))
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert float(_state(hass, "sensor", tmp).state) == 78.6
+
+
+async def test_energy_not_counted_while_apex_is_offline(hass: HomeAssistant, aioclient_mock, freezer) -> None:
+    from datetime import timedelta
+
+    aioclient_mock.get(f"{BASE_URL}/status.json", text=load_fixture("status.json"))
+    entry = _entry()
+    await _setup(hass, entry)
+    coordinator = entry.runtime_data.coordinator
+    energy = f"{UID_BASE}_total_energy"
+    before = float(_state(hass, "sensor", energy).state)
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{BASE_URL}/status.json", exc=aiohttp.ClientError("unreachable"))
+    freezer.tick(timedelta(minutes=10))
+    await coordinator.async_refresh()
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{BASE_URL}/status.json", text=load_fixture("status.json"))
+    freezer.tick(timedelta(minutes=10))
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    # the 20 minutes without readings aren't filled in
+    assert float(_state(hass, "sensor", energy).state) == before
+
+
+async def test_entry_is_keyed_on_the_serial(hass: HomeAssistant, aioclient_mock) -> None:
+    """Entries used to be keyed on the host; the serial survives a new IP address."""
+    aioclient_mock.get(f"{BASE_URL}/status.json", text=load_fixture("status.json"))
+    entry = _entry()
+    await _setup(hass, entry)
+    assert entry.unique_id == UID_BASE

@@ -166,7 +166,7 @@ def test_labels_for_per_outlet_power():
         "Skimmer_2_2W": {"name": "Skimmer_2_2W", "type": "pwr"},
         "ORP": {"name": "ORP", "type": "ORP"},
     }
-    assert build_labels(probes, {}) == {
+    assert build_labels(probes) == {
         "Tmp": "Temp",
         "Tmp2": "Temp 2",
         "Return_2_1W": "Return_2_1W",
@@ -190,3 +190,18 @@ def test_program_setting(prog, expected):
     from custom_components.apex.sensor import program_setting
 
     assert program_setting(prog) == expected
+
+
+def test_json_probes_with_the_same_name_and_no_device_id():
+    data = _parse_status_json(
+        _status_json(
+            [
+                {"type": "in", "name": "Leak", "value": 1},
+                {"did": "1_P1", "type": "Temp", "name": "Tmp", "value": 78},
+                {"did": "1_P2", "type": "Temp", "name": "Tmp2", "value": 79},
+                {"type": "in", "name": "Leak", "value": 2},
+            ]
+        )
+    )
+    # numbered among the probes of that name, so other probes don't change the key
+    assert data["probes"]["Leak_2"]["value"] == 2.0

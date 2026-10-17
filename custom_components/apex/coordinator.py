@@ -11,10 +11,12 @@ from typing import Any
 import aiohttp
 import xml.etree.ElementTree as ET
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
+from .const import DEFAULT_TIMEOUT, ApexSettings
 from .rest import ApexAuthError, ApexRestClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -32,6 +34,13 @@ EXTRAS_SECONDS = 300
 # failed logins can lock the Apex's local web interface.
 AUTH_RETRY_SECONDS = 1800
 
+# what the Apex answers a request that needs the password
+AUTH_STATUSES = (401, 403)
+
+# Entities go unavailable after this many failed polls in a row, rather than showing
+# the last readings as current while the Apex is offline.
+UNAVAILABLE_AFTER_FAILURES = 3
+
 
 def _to_number(s: str | None) -> float | None:
     if s is None:
@@ -45,12 +54,34 @@ def _to_number(s: str | None) -> float | None:
         return None
 
 
+async def _async_fetch_status_once(
+    session: aiohttp.ClientSession,
+    base_url: str,
+    auth: aiohttp.BasicAuth | None,
+    try_json: bool,
+) -> dict[str, Any]:
+    if try_json:
+        async with session.get(f"{base_url}/status.json", auth=auth) as resp:
+            if resp.status < 400:
+                try:
+                    return _parse_status_json(await resp.text())
+                except ValueError as err:
+                    _LOGGER.debug("Apex status.json is not usable (%s); trying status.xml", err)
+            else:
+                _LOGGER.debug("Apex status.json returned HTTP %s; trying status.xml", resp.status)
+
+    async with session.get(f"{base_url}/status.xml", auth=auth) as resp:
+        resp.raise_for_status()
+        return _parse_status_xml(await resp.text())
+
+
 async def async_fetch_status(
     session: aiohttp.ClientSession,
     base_url: str,
     *,
     auth: aiohttp.BasicAuth | None = None,
-    timeout_seconds: int = 10,
+    auth_first: bool = False,
+    timeout_seconds: int = DEFAULT_TIMEOUT,
     try_json: bool = True,
 ) -> dict[str, Any]:
     """Fetch status.json, or status.xml when status.json isn't usable (data["source"] says which).
@@ -58,22 +89,20 @@ async def async_fetch_status(
     Older firmware may answer status.json with any HTTP error or a non-JSON page, so those fall
     back to status.xml. Timeouts and connection errors mean the Apex is unreachable and are raised,
     as are errors from status.xml: asyncio.TimeoutError, aiohttp.ClientError or ET.ParseError.
-    One timeout covers both requests.
+    One timeout covers every request.
+
+    The status pages normally need no login, and this is plain HTTP, so auth is only sent
+    when the Apex asks for it (or auth_first); data["auth"] says whether it was needed.
     """
     async with asyncio.timeout(timeout_seconds):
-        if try_json:
-            async with session.get(f"{base_url}/status.json", auth=auth) as resp:
-                if resp.status < 400:
-                    try:
-                        return _parse_status_json(await resp.text())
-                    except ValueError as err:
-                        _LOGGER.debug("Apex status.json is not usable (%s); trying status.xml", err)
-                else:
-                    _LOGGER.debug("Apex status.json returned HTTP %s; trying status.xml", resp.status)
-
-        async with session.get(f"{base_url}/status.xml", auth=auth) as resp:
-            resp.raise_for_status()
-            return _parse_status_xml(await resp.text())
+        if auth_first and auth is not None:
+            return {**await _async_fetch_status_once(session, base_url, auth, try_json), "auth": True}
+        try:
+            return await _async_fetch_status_once(session, base_url, None, try_json)
+        except aiohttp.ClientResponseError as err:
+            if auth is None or err.status not in AUTH_STATUSES:
+                raise
+        return {**await _async_fetch_status_once(session, base_url, auth, try_json), "auth": True}
 
 
 class ApexDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -82,22 +111,17 @@ class ApexDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def __init__(
         self,
         hass: HomeAssistant,
-        *,
-        base_url: str,
-        username: str = "admin",
-        password: str = "",
-        name: str = "Apex",
-        update_interval: timedelta | None = None,
-        timeout_seconds: int = 10,
+        entry: ConfigEntry | None,
+        settings: ApexSettings,
         rest: ApexRestClient | None = None,
     ) -> None:
-        self.hass = hass
         # with a password: also read modules and config through the REST API
         self.rest = rest
-        self.base_url = base_url
-        self.username = username or ""
-        self.password = password or ""
-        self.timeout_seconds = timeout_seconds
+        self.settings = settings
+        self._auth = aiohttp.BasicAuth(settings.username, settings.password) if settings.password else None
+        self._auth_needed = False
+        # polls in a row that failed; entities go unavailable after a few
+        self.failed_polls = 0
         # Stop asking for status.json only on an Apex where it has never worked,
         # and even then look again occasionally (e.g. after a firmware update).
         self._json_seen = False
@@ -110,31 +134,31 @@ class ApexDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         super().__init__(
             hass,
             _LOGGER,
-            name=name,
-            update_interval=update_interval or timedelta(seconds=30),
+            config_entry=entry,
+            name=f"Apex @ {settings.host}",
+            update_interval=timedelta(seconds=settings.scan_interval),
         )
 
     async def _async_update_data(self) -> dict[str, Any]:
-        session = async_get_clientsession(self.hass)
-
-        auth: aiohttp.BasicAuth | None = None
-        if self.password:
-            auth = aiohttp.BasicAuth(self.username or "admin", self.password)
-
         try_json = self._json_retry_at is None or time.monotonic() >= self._json_retry_at
 
         try:
             data = await async_fetch_status(
-                session,
-                self.base_url,
-                auth=auth,
-                timeout_seconds=self.timeout_seconds,
+                async_get_clientsession(self.hass),
+                self.settings.status_url,
+                auth=self._auth,
+                auth_first=self._auth_needed,
+                timeout_seconds=self.settings.timeout,
                 try_json=try_json,
             )
-        except (asyncio.TimeoutError, aiohttp.ClientError, ET.ParseError) as err:
-            raise UpdateFailed(f"Error fetching/parsing Apex status: {err}") from err
         except Exception as err:
-            raise UpdateFailed(f"Unexpected error updating Apex data: {err}") from err
+            self.failed_polls += 1
+            if self.failed_polls == UNAVAILABLE_AFTER_FAILURES:
+                # the coordinator only tells entities about the first failure in a row
+                self.async_update_listeners()
+            raise UpdateFailed(f"Error fetching Apex status: {err}") from err
+        self.failed_polls = 0
+        self._auth_needed = bool(data.pop("auth", False))
 
         if data["source"] == "json":
             if self._json_failing:
@@ -156,6 +180,11 @@ class ApexDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._async_update_extras()
         data.update(self._extras)
         return data
+
+    @property
+    def stale(self) -> bool:
+        """The last few polls failed, so the readings can't be trusted to be current."""
+        return self.failed_polls >= UNAVAILABLE_AFTER_FAILURES
 
     def request_extras(self) -> None:
         """Read modules and config again on the next refresh (e.g. after changing a program)."""
@@ -260,8 +289,6 @@ def _parse_status_xml(xml_text: str) -> dict[str, Any]:
         "outlets": outlets,
         "inputs": {},  # status.xml doesn't report digital inputs
         "feed": None,  # or the feed cycle
-        "modules": [],
-        "config": None,
     }
 
 
@@ -306,6 +333,7 @@ def _parse_status_json(json_text: str) -> dict[str, Any]:
 
     probes: dict[str, dict[str, Any]] = {}
     inputs: dict[str, dict[str, Any]] = {}
+    name_counts: dict[str, int] = {}
     for i in istat.get("inputs", []) or []:
         if not isinstance(i, dict):
             continue
@@ -330,9 +358,11 @@ def _parse_status_json(json_text: str) -> dict[str, Any]:
             continue
         value_raw = _str_or_none(value)
         key = name
+        name_counts[name] = name_counts.get(name, 0) + 1
         if key in probes:
-            # two inputs with the same name (e.g. two "Leak" probes): tell them apart by device id
-            key = f"{name}_{_str_or_none(i.get('did')) or len(probes)}"
+            # two inputs with the same name (e.g. two "Leak" probes): tell them apart by device id,
+            # else by which one of that name it is
+            key = f"{name}_{_str_or_none(i.get('did')) or name_counts[name]}"
         probes[key] = {
             "name": name,
             "value": _to_number(value_raw),
@@ -386,7 +416,3 @@ def _parse_status_json(json_text: str) -> dict[str, Any]:
         "inputs": inputs,
         "feed": feed,
     }
-
-
-# Allow config_flow to reuse fetching/parsing for "Test Connection"
-__all__ = ["ApexDataUpdateCoordinator", "async_fetch_status", "_parse_status_xml", "_parse_status_json"]

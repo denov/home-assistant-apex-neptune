@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 from __future__ import annotations
 
-import asyncio
 import math
 import re
 from datetime import datetime, timedelta, timezone
@@ -14,27 +13,23 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import PERCENTAGE, UnitOfElectricCurrent, UnitOfEnergy, UnitOfPower, UnitOfVolume
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util.dt import now as dt_now
 
-from custom_components.apex.const import (
-    DOMAIN,
-    SENSOR_MAP,  # optional overrides: { "ProbeName": ("Friendly Name", unit_or_None) }
-    CONF_TEMP_UNIT,
-    DEFAULT_TEMP_UNIT,
-    CONF_AMPS_DIAGNOSTIC,
-    DEFAULT_AMPS_DIAGNOSTIC,
+from .entity import (
+    DOS_TYPES,
+    ApexConfigEntry,
+    ApexEntity,
+    ApexOutputEntity,
+    ApexRuntimeData,
+    async_add_discovered,
+    find_output_config,
+    output_key,
 )
-from custom_components.apex.coordinator import ApexDataUpdateCoordinator
-from custom_components.apex.entity import ApexEntity, find_output, find_output_config
-from custom_components.apex.parsing import build_labels
-from .sensor_helpers import icon_for_type, units_and_meta
-from custom_components.apex.power_math import total_current_amps, total_power_watts
-from custom_components.apex.rest import FEED_LETTERS
+from .parsing import build_labels, probe_type, temp_unit
+from .rest import FEED_LETTERS
 
-DOS_TYPES = ("dos", "dqd")
 # outputs whose program is usually just "Set <value>"
 VARIABLE_TYPES = ("variable", "virtual")
 
@@ -54,8 +49,22 @@ def trident_ml_per_test(hwtype: str) -> float:
     return 3.652 if hwtype == "TNP" else 1.9
 
 
-def output_key(o: dict[str, Any]) -> str:
-    return (o.get("output_id") or "").strip() or (o.get("name") or "").strip()
+def _number(v: Any) -> float | None:
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _probes(data: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    return (data or {}).get("probes", {}) or {}
+
+
+def total_current_amps(probes: dict[str, dict[str, Any]]) -> float | None:
+    """Sum of all probes of type Amps, or None when there are none."""
+    amps = [
+        v
+        for p in probes.values()
+        if (p.get("type") or "").strip().lower() == "amps" and (v := _number(p.get("value"))) is not None
+    ]
+    return sum(amps) if amps else None
 
 
 def output_intensity(o: dict[str, Any]) -> float | None:
@@ -103,20 +112,17 @@ def program_setting(prog: str | None) -> int | float | str | None:
     return int(number) if number.is_integer() else number
 
 
-def _module_name(data: dict[str, Any], module: dict[str, Any]) -> str:
-    config = data.get("config") or {}
-    for m in config.get("mconf") or []:
-        if isinstance(m, dict) and m.get("abaddr") == module.get("abaddr") and m.get("name"):
-            return str(m["name"])
-    return f"{module.get('hwtype')}_{module.get('abaddr')}"
-
-
 def _module_config(data: dict[str, Any] | None, abaddr: Any) -> dict[str, Any]:
     config = (data or {}).get("config") or {}
     for m in config.get("mconf") or []:
         if isinstance(m, dict) and m.get("abaddr") == abaddr:
             return m
     return {}
+
+
+def _module_name(data: dict[str, Any], module: dict[str, Any]) -> str:
+    name = _module_config(data, module.get("abaddr")).get("name")
+    return str(name) if name else f"{module.get('hwtype')}_{module.get('abaddr')}"
 
 
 def _find_module(data: dict[str, Any] | None, abaddr: Any) -> dict[str, Any]:
@@ -127,80 +133,41 @@ def _find_module(data: dict[str, Any] | None, abaddr: Any) -> dict[str, Any]:
 
 
 def _epoch_to_datetime(epoch: Any) -> datetime | None:
-    if not isinstance(epoch, (int, float)) or isinstance(epoch, bool) or epoch <= 0:
+    if _number(epoch) is None or epoch <= 0:
         return None
     return datetime.fromtimestamp(epoch, timezone.utc)
 
 
-async def async_setup_entry(hass, entry, async_add_entities):
-    # Shared coordinator created in __init__.py
-    ctx = hass.data[DOMAIN][entry.entry_id]
-    coordinator: ApexDataUpdateCoordinator = ctx["coordinator"]
-    uid_base: str = ctx["uid_base"]
-    device: DeviceInfo = ctx["device"]
+async def async_setup_entry(hass, entry: ApexConfigEntry, async_add_entities):
+    data = entry.runtime_data
+    settings = data.settings
 
-    # Used for Total Power = Total Current * Line Voltage
-    line_voltage = float(ctx.get("line_voltage", 120))
-    per_outlet_energy = bool(ctx.get("enable_per_outlet_power"))
+    def discover(d: dict[str, Any]):
+        yield "total_current", lambda: ApexTotalCurrentSensor(data)
+        yield "total_power", lambda: ApexTotalPowerSensor(data)
+        yield "total_energy", lambda: ApexTotalEnergySensor(data)
 
-    merged = {**entry.data, **entry.options}
-    configured_temp_unit = merged.get(CONF_TEMP_UNIT, DEFAULT_TEMP_UNIT)
-    amps_diagnostic = bool(merged.get(CONF_AMPS_DIAGNOSTIC, DEFAULT_AMPS_DIAGNOSTIC))
+        # Probes (auto-discovered)
+        probes = _probes(d)
+        labels = build_labels(probes)
+        for name in sorted(probes):
+            label = labels.get(name) or name
+            yield name, lambda name=name, label=label: ApexProbeSensor(data, name, probes[name], label)
+            # Energy for each outlet the Apex measures the power of (EB832)
+            if settings.per_outlet_energy and (probes[name].get("type") or "").strip().lower() == "pwr":
+                yield f"{name}_energy", lambda name=name, label=label: ApexProbeEnergySensor(data, name, f"{label} Energy")
 
-    overrides: dict[str, tuple[str, str | None]] = SENSOR_MAP or {}
+        # Power timestamps (appear only if present; will be added later if they show up)
+        power = d.get("power") or {}
+        for kind in ("failed", "restored"):
+            if power.get(kind):
+                yield f"power_{kind}", lambda kind=kind: ApexPowerTimeSensor(data, kind)
 
-    # Track by unique_id so we never re-add on refresh
-    added_uids: set[str] = set()
-    add_lock = asyncio.Lock()
+        # Feed cycle (status.json only)
+        if d.get("feed") is not None:
+            yield "feed_mode", lambda: ApexFeedSensor(data)
+            yield "feed_ends", lambda: ApexFeedEndsSensor(data)
 
-    total_current = ApexTotalCurrentSensor(coordinator, uid_base, device)
-    total_power = ApexTotalPowerSensor(coordinator, uid_base, device, line_voltage=line_voltage)
-    total_energy = ApexTotalEnergySensor(coordinator, uid_base, device)
-
-    async_add_entities([total_current, total_power, total_energy], True)
-    added_uids.add(total_current.unique_id)
-    added_uids.add(total_power.unique_id)
-    added_uids.add(total_energy.unique_id)
-
-    def _make_probe_entity(
-        probe_name: str,
-        probes_now: dict[str, dict[str, Any]],
-        labels_now: dict[str, str],
-    ) -> ApexProbeSensor:
-        p = probes_now.get(probe_name) or {}
-        typ = (p.get("type") or "").strip()
-        val = p.get("value")
-
-        label = labels_now.get(probe_name) or probe_name
-        unit, device_class, state_class = units_and_meta(
-            probe_name, typ, val, overrides, configured_temp_unit
-        )
-
-        return ApexProbeSensor(
-            coordinator=coordinator,
-            uid_base=uid_base,
-            device_info=device,
-            probe_name=probe_name,
-            probe_type=typ,
-            label=label,
-            unit=unit,
-            device_class=device_class,
-            state_class=state_class,
-            amps_diagnostic=amps_diagnostic,
-        )
-
-    def _make_power_entity(kind: str) -> ApexTextSensor:
-        # kind: "failed" or "restored"
-        return ApexTextSensor(
-            coordinator=coordinator,
-            uid_base=uid_base,
-            device_info=device,
-            unique_key=f"power_{kind}",
-            label=f"Power {kind.capitalize()}",
-        )
-
-    def _output_entities(d: dict[str, Any]) -> list[SensorEntity]:
-        entities: list[SensorEntity] = []
         for o in d.get("outlets", []) or []:
             key = output_key(o)
             if not key:
@@ -208,154 +175,78 @@ async def async_setup_entry(hass, entry, async_add_entities):
             typ = (o.get("type") or "").lower()
             name = o.get("name") or key
             if typ in DOS_TYPES and dos_volumes(o)[1] is not None:
-                entities.append(ApexDosVolumeSensor(coordinator, uid_base, device, key, name))
+                yield f"output_{key}_volume_left", lambda key=key, name=name: ApexDosVolumeSensor(data, key, name)
             elif output_intensity(o) is not None:
-                entities.append(ApexIntensitySensor(coordinator, uid_base, device, key, name))
+                yield f"output_{key}_intensity", lambda key=key, name=name: ApexIntensitySensor(data, key, name)
             if typ in VARIABLE_TYPES and find_output_config(d, o.get("device_id")):
-                entities.append(ApexSettingSensor(coordinator, uid_base, device, key, name))
-        return entities
+                yield f"output_{key}_setting", lambda key=key, name=name: ApexSettingSensor(data, key, name)
 
-    def _trident_entities(d: dict[str, Any]) -> list[SensorEntity]:
-        entities: list[SensorEntity] = []
+        # Trident levels (REST status, so only with a password)
         for m in d.get("modules", []) or []:
             hwtype = m.get("hwtype")
             levels = (m.get("extra") or {}).get("levels")
             if hwtype not in TRIDENT_TYPES or not isinstance(levels, list) or len(levels) < 5:
                 continue
-            module_name = _module_name(d, m)
+            abaddr, module_name = m["abaddr"], _module_name(d, m)
             for letter, index in zip(trident_reagent_names(hwtype), TRIDENT_REAGENTS):
-                entities.append(
-                    ApexTridentReagentSensor(coordinator, uid_base, device, m["abaddr"], module_name, letter, index)
+                yield (
+                    f"trident_{abaddr}_reagent_{letter}",
+                    lambda letter=letter, index=index, abaddr=abaddr, module_name=module_name: (
+                        ApexTridentReagentSensor(data, abaddr, module_name, letter, index)
+                    ),
                 )
-            entities.append(ApexTridentWasteSensor(coordinator, uid_base, device, m["abaddr"], module_name))
-        return entities
+            yield (
+                f"trident_{abaddr}_waste",
+                lambda abaddr=abaddr, module_name=module_name: ApexTridentWasteSensor(data, abaddr, module_name),
+            )
 
-    async def _add_new_entities_from_current_data():
-        async with add_lock:
-            d = coordinator.data or {}
-            probes_now = d.get("probes", {}) or {}
-            labels_now = build_labels(probes_now, overrides)
-
-            new_entities: list[SensorEntity] = []
-
-            # Probes (auto-discovered)
-            for probe_name in sorted(probes_now.keys()):
-                if f"{uid_base}_{probe_name}".lower() not in added_uids:
-                    new_entities.append(_make_probe_entity(probe_name, probes_now, labels_now))
-
-            # Energy for each outlet the Apex measures the power of (EB832)
-            if per_outlet_energy:
-                for probe_name, p in probes_now.items():
-                    if (p.get("type") or "").strip().lower() != "pwr":
-                        continue
-                    label = f"{labels_now.get(probe_name) or probe_name} Energy"
-                    new_entities.append(ApexProbeEnergySensor(coordinator, uid_base, device, probe_name, label))
-
-            # Power timestamps (appear only if present; will be added later if they show up)
-            power = d.get("power") or {}
-            if power.get("failed"):
-                new_entities.append(_make_power_entity("failed"))
-            if power.get("restored"):
-                new_entities.append(_make_power_entity("restored"))
-
-            # Feed cycle (status.json only)
-            if d.get("feed") is not None:
-                new_entities.append(ApexFeedSensor(coordinator, uid_base, device))
-                new_entities.append(ApexFeedEndsSensor(coordinator, uid_base, device))
-
-            new_entities.extend(_output_entities(d))
-            # Trident levels (REST status, so only with a password)
-            new_entities.extend(_trident_entities(d))
-
-            fresh = [e for e in new_entities if e.unique_id not in added_uids]
-            added_uids.update(e.unique_id for e in fresh)
-            if fresh:
-                async_add_entities(fresh, True)
-
-    await _add_new_entities_from_current_data()
-
-    def _on_coordinator_update():
-        hass.async_create_task(_add_new_entities_from_current_data())
-
-    remove_listener = coordinator.async_add_listener(_on_coordinator_update)
-    entry.async_on_unload(remove_listener)
+    async_add_discovered(entry, async_add_entities, discover)
 
 
 class ApexProbeSensor(ApexEntity, SensorEntity):
-    def __init__(
-        self,
-        *,
-        coordinator: ApexDataUpdateCoordinator,
-        uid_base: str,
-        device_info: DeviceInfo,
-        probe_name: str,
-        probe_type: str,
-        label: str,
-        unit: str | None,
-        device_class: SensorDeviceClass | None,
-        state_class: SensorStateClass | None,
-        amps_diagnostic: bool,
-    ):
-        super().__init__(coordinator, device_info, f"{uid_base}_{probe_name}".lower(), label)
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, data: ApexRuntimeData, probe_name: str, probe: dict[str, Any], label: str):
+        super().__init__(data, probe_name, label)
         self._probe = probe_name
-        self._probe_type = probe_type
+        self._probe_type = (probe.get("type") or "").strip()
 
-        self._attr_native_unit_of_measurement = unit
-        self._attr_device_class = device_class
-        self._attr_state_class = state_class
-
-        if self._probe_type.strip().lower() == "amps" and amps_diagnostic:
+        info = probe_type(self._probe_type, probe_name)
+        self._attr_icon = info.icon if info else "mdi:gauge"
+        if info:
+            self._attr_device_class = info.device_class
+            self._attr_native_unit_of_measurement = info.unit
+        if self._probe_type.lower() == "temp":
+            self._attr_native_unit_of_measurement = temp_unit(probe.get("value"), data.settings.temp_unit)
+        if self._probe_type.lower() == "amps" and data.settings.amps_diagnostic:
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def _p(self) -> dict[str, Any]:
-        probes = (self.coordinator.data or {}).get("probes", {}) or {}
-        return probes.get(self._probe) or {}
+        return _probes(self.coordinator.data).get(self._probe) or {}
 
     @property
     def native_value(self):
         return self._p().get("value")
 
     @property
-    def icon(self) -> str | None:
-        return icon_for_type(self._probe_type, self._probe)
-
-    @property
     def extra_state_attributes(self):
-        err = self.coordinator.last_exception
-        return {
-            "apex_probe_name": self._p().get("name") or self._probe,
-            "apex_probe_type": self._probe_type,
-            "last_error": (str(err) if err else None),
-        }
+        return {"apex_probe_name": self._p().get("name") or self._probe, "apex_probe_type": self._probe_type}
 
 
-class ApexTextSensor(ApexEntity, SensorEntity):
-    """Diagnostic text sensor for power failed/restored timestamps."""
+class ApexPowerTimeSensor(ApexEntity, SensorEntity):
+    """Diagnostic text sensor for when the power last failed or was restored."""
+
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
-    def __init__(
-        self,
-        *,
-        coordinator: ApexDataUpdateCoordinator,
-        uid_base: str,
-        device_info: DeviceInfo,
-        unique_key: str,
-        label: str,
-    ):
-        super().__init__(coordinator, device_info, f"{uid_base}_{unique_key}".lower(), label)
-        self._key = unique_key
-        self._attr_icon = "mdi:power-plug-off" if "failed" in unique_key else "mdi:power-plug"
+    def __init__(self, data: ApexRuntimeData, kind: str):
+        # kind: "failed" or "restored"
+        super().__init__(data, f"power_{kind}", f"Power {kind.capitalize()}")
+        self._kind = kind
+        self._attr_icon = "mdi:power-plug-off" if kind == "failed" else "mdi:power-plug"
 
     @property
     def native_value(self):
-        d = self.coordinator.data or {}
-        power = d.get("power") or {}
-
-        if self._key == "power_failed":
-            return power.get("failed")
-        if self._key == "power_restored":
-            return power.get("restored")
-        return None
+        return ((self.coordinator.data or {}).get("power") or {}).get(self._kind)
 
 
 class ApexTotalCurrentSensor(ApexEntity, SensorEntity):
@@ -364,31 +255,31 @@ class ApexTotalCurrentSensor(ApexEntity, SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:current-ac"
 
-    def __init__(self, coordinator: ApexDataUpdateCoordinator, uid_base: str, device_info: DeviceInfo):
-        super().__init__(coordinator, device_info, f"{uid_base}_total_current", "Total Current")
+    def __init__(self, data: ApexRuntimeData):
+        super().__init__(data, "total_current", "Total Current")
 
     @property
     def native_value(self):
-        probes = (self.coordinator.data or {}).get("probes", {}) or {}
-        amps = total_current_amps(probes)
+        amps = total_current_amps(_probes(self.coordinator.data))
         return round(amps, 3) if amps is not None else None
 
 
 class ApexTotalPowerSensor(ApexEntity, SensorEntity):
+    """Total current x the configured line voltage."""
+
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:flash"
 
-    def __init__(self, coordinator: ApexDataUpdateCoordinator, uid_base: str, device_info: DeviceInfo, *, line_voltage: float):
-        super().__init__(coordinator, device_info, f"{uid_base}_total_power", "Total Power")
-        self._v = float(line_voltage)
+    def __init__(self, data: ApexRuntimeData):
+        super().__init__(data, "total_power", "Total Power")
+        self._v = float(data.settings.line_voltage)
 
     @property
     def native_value(self):
-        probes = (self.coordinator.data or {}).get("probes", {}) or {}
-        watts = total_power_watts(probes, self._v)
-        return round(watts, 1) if watts is not None else None
+        amps = total_current_amps(_probes(self.coordinator.data))
+        return round(amps * self._v, 1) if amps is not None else None
 
     @property
     def extra_state_attributes(self):
@@ -403,23 +294,22 @@ class ApexEnergySensor(ApexEntity, RestoreEntity, SensorEntity):
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_icon = "mdi:counter"
 
-    def __init__(self, coordinator: ApexDataUpdateCoordinator, device_info: DeviceInfo, unique_id: str, name: str):
-        super().__init__(coordinator, device_info, unique_id, name)
-        self._kwh: float | None = None
+    # a longer gap between readings (e.g. Home Assistant was stopped) isn't counted
+    _MAX_GAP_SECONDS = 3600
+
+    def __init__(self, data: ApexRuntimeData, key: str, name: str):
+        super().__init__(data, key, name)
+        self._kwh = 0.0
         self._last_ts: datetime | None = None
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-
         state = await self.async_get_last_state()
-        if state and state.state not in (None, "unknown", "unavailable"):
-            try:
-                self._kwh = float(state.state)
-            except Exception:
-                self._kwh = 0.0
-        else:
+        try:
+            self._kwh = float(state.state) if state else 0.0
+        except ValueError:
+            # unknown or unavailable
             self._kwh = 0.0
-
         self._last_ts = dt_now()
 
     def _current_watts(self) -> float | None:
@@ -427,90 +317,54 @@ class ApexEnergySensor(ApexEntity, RestoreEntity, SensorEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        if self._kwh is None:
-            self._kwh = 0.0
+        if not self.coordinator.last_update_success:
+            # the readings are stale: count nothing until the Apex answers again
+            self._last_ts = None
+            self.async_write_ha_state()
+            return
 
         now_ts = dt_now()
-        if self._last_ts is None:
-            self._last_ts = now_ts
-            self.async_write_ha_state()
-            return
-
-        dt_seconds = (now_ts - self._last_ts).total_seconds()
-        self._last_ts = now_ts
-
-        if dt_seconds <= 0 or dt_seconds > 3600:
-            self.async_write_ha_state()
-            return
-
+        last_ts, self._last_ts = self._last_ts, now_ts
         watts = self._current_watts()
-        if watts is None:
-            self.async_write_ha_state()
-            return
-
-        self._kwh += (watts * (dt_seconds / 3600.0)) / 1000.0
+        if last_ts is not None and watts is not None:
+            dt_seconds = (now_ts - last_ts).total_seconds()
+            if 0 < dt_seconds <= self._MAX_GAP_SECONDS:
+                self._kwh += watts * dt_seconds / 3600 / 1000
         self.async_write_ha_state()
 
     @property
     def native_value(self):
-        return round(self._kwh or 0.0, 6)
+        return round(self._kwh, 6)
 
 
 class ApexTotalEnergySensor(ApexEnergySensor):
     """Energy from Total Power (all Amps probes x line voltage)."""
 
-    def __init__(self, coordinator: ApexDataUpdateCoordinator, uid_base: str, device_info: DeviceInfo):
-        super().__init__(coordinator, device_info, f"{uid_base}_total_energy", "Total Energy")
+    def __init__(self, data: ApexRuntimeData):
+        super().__init__(data, "total_energy", "Total Energy")
+        self._v = float(data.settings.line_voltage)
 
     def _current_watts(self) -> float | None:
-        probes = (self.coordinator.data or {}).get("probes", {}) or {}
-
-        line_v = 120.0
-        if hasattr(self.coordinator, "line_voltage"):
-            try:
-                line_v = float(getattr(self.coordinator, "line_voltage"))
-            except Exception:
-                pass
-
-        return total_power_watts(probes, line_v)
+        amps = total_current_amps(_probes(self.coordinator.data))
+        return amps * self._v if amps is not None else None
 
 
 class ApexProbeEnergySensor(ApexEnergySensor):
     """Energy from one outlet's power probe (EB832 "pwr" inputs)."""
 
-    def __init__(
-        self, coordinator: ApexDataUpdateCoordinator, uid_base: str, device_info: DeviceInfo, probe_name: str, label: str
-    ):
-        super().__init__(coordinator, device_info, f"{uid_base}_{probe_name}_energy".lower(), label)
+    def __init__(self, data: ApexRuntimeData, probe_name: str, label: str):
+        super().__init__(data, f"{probe_name}_energy", label)
         self._probe = probe_name
 
     def _current_watts(self) -> float | None:
-        probes = (self.coordinator.data or {}).get("probes", {}) or {}
-        value = (probes.get(self._probe) or {}).get("value")
-        return float(value) if isinstance(value, (int, float)) else None
+        return _number((_probes(self.coordinator.data).get(self._probe) or {}).get("value"))
 
 
-class ApexOutputSensor(ApexEntity, SensorEntity):
+class ApexOutputSensor(ApexOutputEntity, SensorEntity):
     """A reading from an output's status (keyed like the outlet switch: output ID, else name)."""
 
-    def __init__(
-        self,
-        coordinator: ApexDataUpdateCoordinator,
-        uid_base: str,
-        device_info: DeviceInfo,
-        key: str,
-        kind: str,
-        name: str,
-    ):
-        super().__init__(coordinator, device_info, f"{uid_base}_output_{key}_{kind}".lower(), name)
-        self._key = key
-
-    def _output(self) -> dict[str, Any]:
-        return find_output(self.coordinator.data, self._key)
-
-    @property
-    def available(self) -> bool:
-        return self.coordinator.data is not None and bool(self._output())
+    def __init__(self, data: ApexRuntimeData, key: str, kind: str, name: str):
+        super().__init__(data, key, f"output_{key}_{kind}", name)
 
 
 class ApexDosVolumeSensor(ApexOutputSensor):
@@ -521,8 +375,8 @@ class ApexDosVolumeSensor(ApexOutputSensor):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:cup-water"
 
-    def __init__(self, coordinator, uid_base, device_info, key: str, output_name: str):
-        super().__init__(coordinator, uid_base, device_info, key, "volume_left", f"{output_name} Volume Left")
+    def __init__(self, data: ApexRuntimeData, key: str, output_name: str):
+        super().__init__(data, key, "volume_left", f"{output_name} Volume Left")
 
     @property
     def native_value(self):
@@ -542,8 +396,8 @@ class ApexIntensitySensor(ApexOutputSensor):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:pump"
 
-    def __init__(self, coordinator, uid_base, device_info, key: str, output_name: str):
-        super().__init__(coordinator, uid_base, device_info, key, "intensity", f"{output_name} Intensity")
+    def __init__(self, data: ApexRuntimeData, key: str, output_name: str):
+        super().__init__(data, key, "intensity", f"{output_name} Intensity")
 
     @property
     def native_value(self):
@@ -563,8 +417,8 @@ class ApexSettingSensor(ApexOutputSensor):
 
     _attr_icon = "mdi:variable"
 
-    def __init__(self, coordinator, uid_base, device_info, key: str, output_name: str):
-        super().__init__(coordinator, uid_base, device_info, key, "setting", f"{output_name} Setting")
+    def __init__(self, data: ApexRuntimeData, key: str, output_name: str):
+        super().__init__(data, key, "setting", f"{output_name} Setting")
 
     def _config(self) -> dict[str, Any]:
         return find_output_config(self.coordinator.data, self._output().get("device_id"))
@@ -584,8 +438,8 @@ class ApexTridentSensor(ApexEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.VOLUME_STORAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
 
-    def __init__(self, coordinator, device_info, unique_id: str, name: str, abaddr: Any):
-        super().__init__(coordinator, device_info, unique_id, name)
+    def __init__(self, data: ApexRuntimeData, key: str, name: str, abaddr: Any):
+        super().__init__(data, key, name)
         self._abaddr = abaddr
 
     def _module(self) -> dict[str, Any]:
@@ -593,8 +447,8 @@ class ApexTridentSensor(ApexEntity, SensorEntity):
 
     def _level(self, index: int) -> float | None:
         levels = (self._module().get("extra") or {}).get("levels") or []
-        value = levels[index] if len(levels) > index else None
-        return round(float(value), 1) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+        value = _number(levels[index]) if len(levels) > index else None
+        return round(value, 1) if value is not None else None
 
     def _reset_time(self, index: int) -> datetime | None:
         times = (self._module().get("extra") or {}).get("resetTime") or []
@@ -602,7 +456,7 @@ class ApexTridentSensor(ApexEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.data is not None and bool(self._module())
+        return super().available and bool(self._module())
 
 
 class ApexTridentReagentSensor(ApexTridentSensor):
@@ -610,14 +464,8 @@ class ApexTridentReagentSensor(ApexTridentSensor):
 
     _attr_icon = "mdi:flask"
 
-    def __init__(self, coordinator, uid_base, device_info, abaddr: Any, module_name: str, letter: str, index: int):
-        super().__init__(
-            coordinator,
-            device_info,
-            f"{uid_base}_trident_{abaddr}_reagent_{letter}".lower(),
-            f"{module_name} Reagent {letter}",
-            abaddr,
-        )
+    def __init__(self, data: ApexRuntimeData, abaddr: Any, module_name: str, letter: str, index: int):
+        super().__init__(data, f"trident_{abaddr}_reagent_{letter}", f"{module_name} Reagent {letter}", abaddr)
         self._index = index
 
     @property
@@ -639,10 +487,8 @@ class ApexTridentWasteSensor(ApexTridentSensor):
 
     _attr_icon = "mdi:delete-variant"
 
-    def __init__(self, coordinator, uid_base, device_info, abaddr: Any, module_name: str):
-        super().__init__(
-            coordinator, device_info, f"{uid_base}_trident_{abaddr}_waste".lower(), f"{module_name} Waste", abaddr
-        )
+    def __init__(self, data: ApexRuntimeData, abaddr: Any, module_name: str):
+        super().__init__(data, f"trident_{abaddr}_waste", f"{module_name} Waste", abaddr)
 
     @property
     def native_value(self):
@@ -651,8 +497,7 @@ class ApexTridentWasteSensor(ApexTridentSensor):
     @property
     def extra_state_attributes(self):
         used = self._level(TRIDENT_WASTE)
-        size = (_module_config(self.coordinator.data, self._abaddr).get("extra") or {}).get("wasteSize")
-        size = float(size) if isinstance(size, (int, float)) and not isinstance(size, bool) else None
+        size = _number((_module_config(self.coordinator.data, self._abaddr).get("extra") or {}).get("wasteSize"))
         emptied = self._reset_time(TRIDENT_WASTE)
         return {
             # size 0: the waste goes to a drain
@@ -665,17 +510,25 @@ class ApexTridentWasteSensor(ApexTridentSensor):
 FEED_OFF = "Off"
 
 
-class ApexFeedSensor(ApexEntity, SensorEntity):
+class ApexFeedEntity(ApexEntity, SensorEntity):
+    """A sensor for the feed cycle (status.json only)."""
+
+    def _feed(self) -> dict[str, Any]:
+        return (self.coordinator.data or {}).get("feed") or {}
+
+    @property
+    def available(self) -> bool:
+        return super().available and bool(self._feed())
+
+
+class ApexFeedSensor(ApexFeedEntity):
     """Which feed cycle (A-D) is running, if any."""
 
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = [FEED_OFF, *FEED_LETTERS.values()]
 
-    def __init__(self, coordinator: ApexDataUpdateCoordinator, uid_base: str, device_info: DeviceInfo):
-        super().__init__(coordinator, device_info, f"{uid_base}_feed_mode", "Feed Mode")
-
-    def _feed(self) -> dict[str, Any]:
-        return (self.coordinator.data or {}).get("feed") or {}
+    def __init__(self, data: ApexRuntimeData):
+        super().__init__(data, "feed_mode", "Feed Mode")
 
     @property
     def native_value(self):
@@ -690,10 +543,6 @@ class ApexFeedSensor(ApexEntity, SensorEntity):
         return "mdi:fish-off" if self.native_value == FEED_OFF else "mdi:fish"
 
     @property
-    def available(self) -> bool:
-        return self.coordinator.data is not None and bool(self._feed())
-
-    @property
     def extra_state_attributes(self):
         f = self._feed()
         running = f.get("name") in FEED_LETTERS
@@ -705,7 +554,7 @@ class ApexFeedSensor(ApexEntity, SensorEntity):
         }
 
 
-class ApexFeedEndsSensor(ApexEntity, SensorEntity):
+class ApexFeedEndsSensor(ApexFeedEntity):
     """When the running feed cycle ends.
 
     The Apex only reports seconds remaining as of each poll; as a timestamp the
@@ -718,12 +567,9 @@ class ApexFeedEndsSensor(ApexEntity, SensorEntity):
     # polls land at a different point within each second; ignore that much drift
     _JITTER_SECONDS = 2
 
-    def __init__(self, coordinator: ApexDataUpdateCoordinator, uid_base: str, device_info: DeviceInfo):
-        super().__init__(coordinator, device_info, f"{uid_base}_feed_ends", "Feed Ends")
+    def __init__(self, data: ApexRuntimeData):
+        super().__init__(data, "feed_ends", "Feed Ends")
         self._ends: datetime | None = None
-
-    def _feed(self) -> dict[str, Any]:
-        return (self.coordinator.data or {}).get("feed") or {}
 
     def _update_ends(self) -> None:
         f = self._feed()
@@ -747,7 +593,3 @@ class ApexFeedEndsSensor(ApexEntity, SensorEntity):
     @property
     def native_value(self) -> datetime | None:
         return self._ends
-
-    @property
-    def available(self) -> bool:
-        return self.coordinator.data is not None and bool(self._feed())
