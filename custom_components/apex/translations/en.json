@@ -86,7 +86,7 @@
     },
     "set_dos_rate": {
       "name": "Set DOS rate",
-      "description": "Runs a DOS or DQD pump continuously at a rate in mL per minute, using a profile the integration takes over and renames Dose_<device id>. 0 turns the pump off. Target the pump's Mode entity.",
+      "description": "Runs a DOS or DQD pump continuously at a rate in mL per minute, using a profile the integration takes over and renames after the pump (Dose_ and its device ID). 0 turns the pump off. Target the pump's Mode entity.",
       "fields": {
         "profile_id": {
           "name": "Profile",
