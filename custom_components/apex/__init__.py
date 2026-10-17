@@ -23,7 +23,7 @@ from .const import CONF_LINE_VOLTAGE, DEFAULT_LINE_VOLTAGE, CONF_ENABLE_PER_OUTL
     DEFAULT_ENABLE_PER_OUTLET_POWER
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-PLATFORMS: list[str] = ["sensor", "switch"]
+PLATFORMS: list[str] = ["sensor", "switch", "binary_sensor"]
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
