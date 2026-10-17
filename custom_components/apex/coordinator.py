@@ -4,11 +4,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import aiohttp
-import async_timeout
 import xml.etree.ElementTree as ET
 
 from homeassistant.core import HomeAssistant
@@ -16,6 +15,10 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 _LOGGER = logging.getLogger(__name__)
+
+# status.json reports digital inputs as 0 (OPEN) or 200 (CLOSED); unconnected inputs read OPEN.
+DIGITAL_OPEN = 0
+DIGITAL_CLOSED = 200
 
 
 def _to_number(s: str | None) -> float | None:
@@ -30,14 +33,39 @@ def _to_number(s: str | None) -> float | None:
         return None
 
 
+async def async_fetch_status(
+    session: aiohttp.ClientSession,
+    base_url: str,
+    *,
+    auth: aiohttp.BasicAuth | None = None,
+    timeout_seconds: int = 10,
+    try_json: bool = True,
+) -> dict[str, Any]:
+    """Fetch status.json, or status.xml on Apex firmware without it (data["source"] says which).
+
+    Raises asyncio.TimeoutError, aiohttp.ClientError, ValueError (bad JSON) or ET.ParseError.
+    """
+    if try_json:
+        async with asyncio.timeout(timeout_seconds):
+            async with session.get(f"{base_url}/status.json", auth=auth) as resp:
+                if resp.status != 404:
+                    resp.raise_for_status()
+                    return _parse_status_json(await resp.text())
+
+    async with asyncio.timeout(timeout_seconds):
+        async with session.get(f"{base_url}/status.xml", auth=auth) as resp:
+            resp.raise_for_status()
+            return _parse_status_xml(await resp.text())
+
+
 class ApexDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
-    """Fetches and parses Apex status.xml into a shared data dict for entities."""
+    """Fetches and parses Apex status.json (or status.xml) into a shared data dict for entities."""
 
     def __init__(
         self,
         hass: HomeAssistant,
         *,
-        url: str,
+        base_url: str,
         username: str = "admin",
         password: str = "",
         name: str = "Apex",
@@ -45,9 +73,7 @@ class ApexDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         timeout_seconds: int = 10,
     ) -> None:
         self.hass = hass
-        self.url = url
-        # Digital inputs (switches) are only reported by status.json, not status.xml.
-        self.json_url = url.rsplit("/", 1)[0] + "/status.json"
+        self.base_url = base_url
         self.username = username or ""
         self.password = password or ""
         self.timeout_seconds = timeout_seconds
@@ -68,44 +94,24 @@ class ApexDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             auth = aiohttp.BasicAuth(self.username or "admin", self.password)
 
         try:
-            async with async_timeout.timeout(self.timeout_seconds):
-                async with session.get(self.url, auth=auth) as resp:
-                    resp.raise_for_status()
-                    body = await resp.text()
-
-            data = _parse_status_xml(body)
-
-        except (asyncio.TimeoutError, aiohttp.ClientError, ET.ParseError) as err:
-            raise UpdateFailed(f"Error fetching/parsing Apex status.xml: {err}") from err
+            data = await async_fetch_status(
+                session,
+                self.base_url,
+                auth=auth,
+                timeout_seconds=self.timeout_seconds,
+                try_json=self._json_supported,
+            )
+        except (asyncio.TimeoutError, aiohttp.ClientError, ValueError, ET.ParseError) as err:
+            raise UpdateFailed(f"Error fetching/parsing Apex status: {err}") from err
         except Exception as err:
             raise UpdateFailed(f"Unexpected error updating Apex data: {err}") from err
 
-        data["inputs"] = await self._async_fetch_inputs(session, auth)
+        if self._json_supported and data["source"] == "xml":
+            # don't ask for status.json again every poll
+            _LOGGER.info("Apex has no status.json; using status.xml (digital inputs not available)")
+            self._json_supported = False
+
         return data
-
-    async def _async_fetch_inputs(
-        self, session: aiohttp.ClientSession, auth: aiohttp.BasicAuth | None
-    ) -> dict[str, dict[str, Any]]:
-        """Digital inputs from status.json; empty if unavailable, so xml-based entities keep working."""
-        if not self._json_supported:
-            return {}
-
-        try:
-            async with async_timeout.timeout(self.timeout_seconds):
-                async with session.get(self.json_url, auth=auth) as resp:
-                    if resp.status == 404:
-                        _LOGGER.info("Apex has no status.json; digital inputs will not be available")
-                        self._json_supported = False
-                        return {}
-                    resp.raise_for_status()
-                    body = await resp.text()
-
-            return _parse_status_json_inputs(body)
-
-        except (asyncio.TimeoutError, aiohttp.ClientError, ValueError) as err:
-            _LOGGER.debug("Error fetching/parsing Apex status.json: %s", err)
-            # keep the last known inputs rather than flapping entities
-            return (self.data or {}).get("inputs", {}) or {}
 
 
 def _parse_status_xml(xml_text: str) -> dict[str, Any]:
@@ -156,48 +162,112 @@ def _parse_status_xml(xml_text: str) -> dict[str, Any]:
         )
 
     return {
+        "source": "xml",
         "meta": meta,
         "power": power,
         "probes": probes,
         "outlets": outlets,
+        "inputs": {},  # status.xml doesn't report digital inputs
     }
 
 
-# status.json reports digital inputs as 0 (OPEN) or 200 (CLOSED); unconnected inputs read OPEN.
-DIGITAL_OPEN = 0
-DIGITAL_CLOSED = 200
+def _format_apex_time(epoch: Any, tz_hours: float) -> str | None:
+    """status.json times are UTC epochs; format them like status.xml (Apex local time)."""
+    if not isinstance(epoch, (int, float)) or isinstance(epoch, bool) or epoch <= 0:
+        return None
+    local = datetime.fromtimestamp(epoch, timezone.utc) + timedelta(hours=tz_hours)
+    return local.strftime("%m/%d/%Y %H:%M:%S")
 
 
-def _parse_status_json_inputs(json_text: str) -> dict[str, dict[str, Any]]:
-    """Digital inputs from status.json, keyed by device id (e.g. "base_I1", "3_I2")."""
+def _str_or_none(v: Any) -> str | None:
+    if v is None:
+        return None
+    return str(v).strip() or None
+
+
+def _parse_status_json(json_text: str) -> dict[str, Any]:
+    """Parse status.json into the same shape as _parse_status_xml, plus digital inputs."""
     doc = json.loads(json_text)
-    istat = doc.get("istat", doc) if isinstance(doc, dict) else {}
+    istat = doc.get("istat") if isinstance(doc, dict) else None
+    if not isinstance(istat, dict):
+        raise ValueError("status.json has no istat object")
 
+    tz = _str_or_none(istat.get("timezone"))
+    tz_hours = _to_number(tz) or 0.0
+
+    meta: dict[str, Any] = {
+        "software": _str_or_none(istat.get("software")),
+        "hardware": _str_or_none(istat.get("hardware")),
+        "hostname": _str_or_none(istat.get("hostname")),
+        "serial": _str_or_none(istat.get("serial")),
+        "timezone": tz,
+        "date": _format_apex_time(istat.get("date"), tz_hours),
+    }
+
+    power_raw = istat.get("power") or {}
+    power: dict[str, Any] = {
+        "failed": _format_apex_time(power_raw.get("failed"), tz_hours),
+        "restored": _format_apex_time(power_raw.get("restored"), tz_hours),
+    }
+
+    probes: dict[str, dict[str, Any]] = {}
     inputs: dict[str, dict[str, Any]] = {}
     for i in istat.get("inputs", []) or []:
-        if not isinstance(i, dict) or (i.get("type") or "").strip().lower() != "digital":
+        if not isinstance(i, dict):
             continue
-        did = (i.get("did") or "").strip()
-        if not did:
-            continue
-
+        typ = _str_or_none(i.get("type"))
+        name = _str_or_none(i.get("name"))
         value = i.get("value")
-        if value == DIGITAL_CLOSED:
-            state = "CLOSED"
-        elif value == DIGITAL_OPEN:
-            state = "OPEN"
-        else:
-            state = None
 
-        inputs[did] = {
-            "did": did,
-            "name": (i.get("name") or "").strip() or did,
-            "value": value,
-            "state": state,
+        if (typ or "").lower() == "digital":
+            did = _str_or_none(i.get("did"))
+            if not did:
+                continue
+            if value == DIGITAL_CLOSED:
+                state = "CLOSED"
+            elif value == DIGITAL_OPEN:
+                state = "OPEN"
+            else:
+                state = None
+            inputs[did] = {"did": did, "name": name or did, "value": value, "state": state}
+            continue
+
+        if not name:
+            continue
+        value_raw = _str_or_none(value)
+        probes[name] = {
+            "name": name,
+            "value": _to_number(value_raw),
+            "value_raw": value_raw,
+            "type": typ,
         }
 
-    return inputs
+    outlets: list[dict[str, Any]] = []
+    for o in istat.get("outputs", []) or []:
+        if not isinstance(o, dict):
+            continue
+        name = _str_or_none(o.get("name"))
+        if not name:
+            continue
+        status = o.get("status") or []
+        outlets.append(
+            {
+                "name": name,
+                "output_id": _str_or_none(o.get("ID")),
+                "state": _str_or_none(status[0]) if status else None,
+                "device_id": _str_or_none(o.get("did")),
+            }
+        )
+
+    return {
+        "source": "json",
+        "meta": meta,
+        "power": power,
+        "probes": probes,
+        "outlets": outlets,
+        "inputs": inputs,
+    }
 
 
-# Allow config_flow to reuse parsing for "Test Connection"
-__all__ = ["ApexDataUpdateCoordinator", "_parse_status_xml", "_parse_status_json_inputs"]
+# Allow config_flow to reuse fetching/parsing for "Test Connection"
+__all__ = ["ApexDataUpdateCoordinator", "async_fetch_status", "_parse_status_xml", "_parse_status_json"]

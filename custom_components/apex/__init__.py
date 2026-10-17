@@ -43,11 +43,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     scan_interval = int(merged.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL))
     timeout_seconds = int(merged.get(CONF_TIMEOUT, DEFAULT_TIMEOUT))
 
-    url = f"http://{ip}/cgi-bin/status.xml"
-
     coordinator = ApexDataUpdateCoordinator(
         hass,
-        url=url,
+        base_url=f"http://{ip}/cgi-bin",
         username=username,
         password=password,
         name=f"Apex @ {ip}",

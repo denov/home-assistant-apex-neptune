@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 
-import asyncio
 from datetime import timedelta
 
 import voluptuous as vol
@@ -33,7 +32,7 @@ from .const import (
     CONF_ENABLE_PER_OUTLET_POWER,
     DEFAULT_ENABLE_PER_OUTLET_POWER,
 )
-from .coordinator import _parse_status_xml
+from .coordinator import async_fetch_status
 
 
 TEMP_UNIT_SELECTOR = selector.SelectSelector(
@@ -164,8 +163,6 @@ class ApexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         ip = user_input[CONF_IP_ADDRESS]
         username = user_input.get(CONF_USERNAME, DEFAULT_USERNAME)
         password = user_input.get(CONF_PASSWORD, DEFAULT_PASSWORD)
-        url = f"http://{ip}/cgi-bin/status.xml"
-
         session = async_get_clientsession(self.hass)
 
         auth = None
@@ -175,13 +172,7 @@ class ApexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             auth = aiohttp.BasicAuth(username or DEFAULT_USERNAME, password)
 
         try:
-            timeout = 10
-            async with asyncio.timeout(timeout):
-                async with session.get(url, auth=auth) as resp:
-                    resp.raise_for_status()
-                    txt = await resp.text()
-
-            parsed = _parse_status_xml(txt)
+            parsed = await async_fetch_status(session, f"http://{ip}/cgi-bin", auth=auth, timeout_seconds=10)
             self._meta = parsed.get("meta", {}) or {}
             return True
         except Exception:
