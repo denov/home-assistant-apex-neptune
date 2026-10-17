@@ -8,8 +8,18 @@
           "ip_address": "Apex IP Address",
           "username": "Username",
           "password": "Password"
+        },
+        "data_description": {
+          "password": "Optional for monitoring. Needed for the feed cycle buttons."
         }
       }
+    },
+    "error": {
+      "cannot_connect": "Couldn't reach the Apex. Check the IP address.",
+      "invalid_auth": "The Apex rejected the username or password."
+    },
+    "abort": {
+      "already_configured": "This Apex is already set up."
     }
   }
 }

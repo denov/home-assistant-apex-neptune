@@ -30,6 +30,7 @@ from custom_components.apex.coordinator import ApexDataUpdateCoordinator
 from custom_components.apex.parsing import build_labels, one_apex_prefix, safe_uid_base
 from .sensor_helpers import icon_for_type, units_and_meta
 from custom_components.apex.power_math import total_current_amps, total_power_watts
+from custom_components.apex.rest import FEED_LETTERS
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -148,6 +149,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 if uid not in added_uids:
                     new_entities.append(_make_power_entity("restored"))
                     added_uids.add(uid)
+
+            # Feed cycle (status.json only)
+            if d.get("feed") is not None:
+                feed_sensor = ApexFeedSensor(coordinator, uid_base, device)
+                if feed_sensor.unique_id not in added_uids:
+                    new_entities.append(feed_sensor)
+                    added_uids.add(feed_sensor.unique_id)
 
             if new_entities:
                 async_add_entities(new_entities, True)
@@ -382,3 +390,49 @@ class ApexTotalEnergySensor(CoordinatorEntity[ApexDataUpdateCoordinator], Restor
     @property
     def available(self) -> bool:
         return self.coordinator.data is not None
+
+
+FEED_OFF = "Off"
+
+
+class ApexFeedSensor(CoordinatorEntity[ApexDataUpdateCoordinator], SensorEntity):
+    """Which feed cycle (A-D) is running, if any."""
+
+    _attr_name = "Apex Feed Mode"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = [FEED_OFF, *FEED_LETTERS.values()]
+
+    def __init__(self, coordinator: ApexDataUpdateCoordinator, uid_base: str, device_info: DeviceInfo):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{uid_base}_feed_mode"
+        self._attr_device_info = device_info
+
+    def _feed(self) -> dict[str, Any]:
+        return (self.coordinator.data or {}).get("feed") or {}
+
+    @property
+    def native_value(self):
+        name = self._feed().get("name")
+        if name == 0:
+            return FEED_OFF
+        # anything else (e.g. a bogus cycle) is unknown
+        return FEED_LETTERS.get(name)
+
+    @property
+    def icon(self) -> str:
+        return "mdi:fish-off" if self.native_value == FEED_OFF else "mdi:fish"
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.data is not None and bool(self._feed())
+
+    @property
+    def extra_state_attributes(self):
+        f = self._feed()
+        running = f.get("name") in FEED_LETTERS
+        return {
+            # seconds left as of the last poll
+            "remaining_seconds": f.get("active") if running else 0,
+            "apex_feed_name": f.get("name"),
+            "apex_feed_active": f.get("active"),
+        }

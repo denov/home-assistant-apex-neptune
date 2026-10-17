@@ -5,6 +5,7 @@ from datetime import timedelta
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     DOMAIN,
@@ -19,11 +20,12 @@ from .const import (
     DEFAULT_TIMEOUT,
 )
 from .coordinator import ApexDataUpdateCoordinator
+from .rest import ApexRestClient
 from .const import CONF_LINE_VOLTAGE, DEFAULT_LINE_VOLTAGE, CONF_ENABLE_PER_OUTLET_POWER, \
     DEFAULT_ENABLE_PER_OUTLET_POWER
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-PLATFORMS: list[str] = ["sensor", "switch", "binary_sensor"]
+PLATFORMS: list[str] = ["sensor", "switch", "binary_sensor", "button"]
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -56,8 +58,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await coordinator.async_config_entry_first_refresh()
 
+    # control (feed cycles) needs a REST login; reading works without a password
+    rest: ApexRestClient | None = None
+    if password:
+        rest = ApexRestClient(
+            async_get_clientsession(hass),
+            f"http://{ip}",
+            username,
+            password,
+            timeout_seconds=timeout_seconds,
+        )
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "coordinator": coordinator,
+        "rest": rest,
         "ip": ip,
         "line_voltage": line_voltage,
         "enable_per_outlet_power": enable_per_outlet_power,

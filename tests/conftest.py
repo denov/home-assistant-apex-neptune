@@ -10,7 +10,8 @@ pytest_plugins = "pytest_homeassistant_custom_component"
 FIXTURES = Path(__file__).parent / "fixtures"
 
 APEX_IP = "1.2.3.4"
-BASE_URL = f"http://{APEX_IP}/cgi-bin"
+HOST_URL = f"http://{APEX_IP}"
+BASE_URL = f"{HOST_URL}/cgi-bin"
 # safe_uid_base() of the fixture serial "AC5:12345"
 UID_BASE = "ac5_12345"
 

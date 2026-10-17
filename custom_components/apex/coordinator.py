@@ -195,6 +195,7 @@ def _parse_status_xml(xml_text: str) -> dict[str, Any]:
         "probes": probes,
         "outlets": outlets,
         "inputs": {},  # status.xml doesn't report digital inputs
+        "feed": None,  # or the feed cycle
     }
 
 
@@ -286,6 +287,17 @@ def _parse_status_json(json_text: str) -> dict[str, Any]:
             }
         )
 
+    feed_raw = istat.get("feed")
+    feed: dict[str, Any] | None = None
+    if isinstance(feed_raw, dict):
+        name, active = feed_raw.get("name"), feed_raw.get("active")
+        feed = {
+            # 0 = no feed, 1-4 = feed A-D
+            "name": name if isinstance(name, int) else None,
+            # seconds remaining while a feed runs
+            "active": active if isinstance(active, int) else None,
+        }
+
     return {
         "source": "json",
         "meta": meta,
@@ -293,6 +305,7 @@ def _parse_status_json(json_text: str) -> dict[str, Any]:
         "probes": probes,
         "outlets": outlets,
         "inputs": inputs,
+        "feed": feed,
     }
 
 

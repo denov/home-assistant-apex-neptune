@@ -33,6 +33,7 @@ from .const import (
     DEFAULT_ENABLE_PER_OUTLET_POWER,
 )
 from .coordinator import async_fetch_status
+from .rest import ApexAuthError, ApexRestClient
 
 
 TEMP_UNIT_SELECTOR = selector.SelectSelector(
@@ -137,10 +138,12 @@ class ApexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             # Test connection now
             ok = await self._async_test_connection(user_input)
-            if ok:
-                self._user_input = user_input
-                return await self.async_step_confirm()
-            return self.async_show_form(step_id="user", data_schema=_schema_user(), errors={"base": "cannot_connect"})
+            if not ok:
+                return self.async_show_form(step_id="user", data_schema=_schema_user(), errors={"base": "cannot_connect"})
+            if not await self._async_test_login(user_input):
+                return self.async_show_form(step_id="user", data_schema=_schema_user(), errors={"base": "invalid_auth"})
+            self._user_input = user_input
+            return await self.async_step_confirm()
 
         return self.async_show_form(step_id="user", data_schema=_schema_user(), errors={})
 
@@ -178,6 +181,29 @@ class ApexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except Exception:
             self._meta = {}
             return False
+
+    async def _async_test_login(self, user_input: dict) -> bool:
+        """With a password, check it against the REST login used for feed control.
+
+        Only a rejected login fails: other errors (e.g. firmware without the REST API)
+        shouldn't block monitoring.
+        """
+        password = user_input.get(CONF_PASSWORD, DEFAULT_PASSWORD)
+        if not password:
+            return True
+        client = ApexRestClient(
+            async_get_clientsession(self.hass),
+            f"http://{user_input[CONF_IP_ADDRESS]}",
+            user_input.get(CONF_USERNAME, DEFAULT_USERNAME),
+            password,
+        )
+        try:
+            await client.async_login()
+        except ApexAuthError:
+            return False
+        except Exception:
+            pass
+        return True
 
     @staticmethod
     @callback

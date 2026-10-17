@@ -121,3 +121,11 @@ def test_bad_status_json_raises(text):
 )
 def test_format_apex_time(epoch, tz_hours, expected):
     assert _format_apex_time(epoch, tz_hours) == expected
+
+
+def test_json_feed_state():
+    assert _parse_status_json(load_fixture("status.json"))["feed"] == {"name": 0, "active": 0}
+    assert _parse_status_xml(load_fixture("status.xml"))["feed"] is None
+    running = json.dumps({"istat": {"feed": {"name": 1, "active": 299}}})
+    assert _parse_status_json(running)["feed"] == {"name": 1, "active": 299}
+    assert _parse_status_json('{"istat": {}}')["feed"] is None

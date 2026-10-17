@@ -64,3 +64,32 @@ async def test_already_configured(hass: HomeAssistant, aioclient_mock) -> None:
     result = await hass.config_entries.flow.async_configure(result["flow_id"], USER_INPUT)
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
+
+
+async def test_wrong_password(hass: HomeAssistant, aioclient_mock) -> None:
+    aioclient_mock.get(f"{BASE_URL}/status.json", text=load_fixture("status.json"))
+    aioclient_mock.post(f"http://{APEX_IP}/rest/login", status=401)
+
+    result = await _start(hass)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {**USER_INPUT, CONF_PASSWORD: "wrong"})
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_auth"}
+
+
+async def test_password_checked_against_rest_login(hass: HomeAssistant, aioclient_mock) -> None:
+    aioclient_mock.get(f"{BASE_URL}/status.json", text=load_fixture("status.json"))
+    aioclient_mock.post(f"http://{APEX_IP}/rest/login", json={"connect.sid": "sid-1"})
+
+    result = await _start(hass)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {**USER_INPUT, CONF_PASSWORD: "secret"})
+    assert result["step_id"] == "confirm"
+
+
+async def test_firmware_without_rest_login_can_still_be_added(hass: HomeAssistant, aioclient_mock) -> None:
+    aioclient_mock.get(f"{BASE_URL}/status.json", status=404)
+    aioclient_mock.get(f"{BASE_URL}/status.xml", text=load_fixture("status.xml"))
+    aioclient_mock.post(f"http://{APEX_IP}/rest/login", status=404)
+
+    result = await _start(hass)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {**USER_INPUT, CONF_PASSWORD: "secret"})
+    assert result["step_id"] == "confirm"
