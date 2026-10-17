@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.core import callback
@@ -152,10 +152,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
             # Feed cycle (status.json only)
             if d.get("feed") is not None:
-                feed_sensor = ApexFeedSensor(coordinator, uid_base, device)
-                if feed_sensor.unique_id not in added_uids:
-                    new_entities.append(feed_sensor)
-                    added_uids.add(feed_sensor.unique_id)
+                for feed_entity in (
+                    ApexFeedSensor(coordinator, uid_base, device),
+                    ApexFeedEndsSensor(coordinator, uid_base, device),
+                ):
+                    if feed_entity.unique_id not in added_uids:
+                        new_entities.append(feed_entity)
+                        added_uids.add(feed_entity.unique_id)
 
             if new_entities:
                 async_add_entities(new_entities, True)
@@ -436,3 +439,54 @@ class ApexFeedSensor(CoordinatorEntity[ApexDataUpdateCoordinator], SensorEntity)
             "apex_feed_name": f.get("name"),
             "apex_feed_active": f.get("active"),
         }
+
+
+class ApexFeedEndsSensor(CoordinatorEntity[ApexDataUpdateCoordinator], SensorEntity):
+    """When the running feed cycle ends.
+
+    The Apex only reports seconds remaining as of each poll; as a timestamp the
+    frontend can count down between polls ("in 4 minutes").
+    """
+
+    _attr_name = "Apex Feed Ends"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:timer-sand"
+
+    # polls land at a different point within each second; ignore that much drift
+    _JITTER_SECONDS = 2
+
+    def __init__(self, coordinator: ApexDataUpdateCoordinator, uid_base: str, device_info: DeviceInfo):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{uid_base}_feed_ends"
+        self._attr_device_info = device_info
+        self._ends: datetime | None = None
+
+    def _feed(self) -> dict[str, Any]:
+        return (self.coordinator.data or {}).get("feed") or {}
+
+    def _update_ends(self) -> None:
+        f = self._feed()
+        remaining = f.get("active")
+        if f.get("name") not in FEED_LETTERS or not isinstance(remaining, int) or remaining <= 0:
+            self._ends = None
+            return
+        ends = dt_now() + timedelta(seconds=remaining)
+        if self._ends is None or abs((ends - self._ends).total_seconds()) > self._JITTER_SECONDS:
+            self._ends = ends
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self._update_ends()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self._update_ends()
+        super()._handle_coordinator_update()
+
+    @property
+    def native_value(self) -> datetime | None:
+        return self._ends
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.data is not None and bool(self._feed())

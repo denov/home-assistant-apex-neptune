@@ -143,3 +143,39 @@ async def test_feed_mode_updates_right_after_press(hass: HomeAssistant, aioclien
 
     assert hass.states.get(sensor).state == "A"
     assert hass.states.get(sensor).attributes["remaining_seconds"] == 300
+
+
+async def test_feed_ends_sensor(hass: HomeAssistant, aioclient_mock, freezer) -> None:
+    from datetime import timedelta
+
+    from homeassistant.util import dt as dt_util
+
+    start = dt_util.utcnow().replace(microsecond=0)
+    freezer.move_to(start)
+    await _setup(hass, aioclient_mock, password="", status=_status_json({"name": 1, "active": 300}))
+    coordinator = hass.data[DOMAIN][next(iter(hass.data[DOMAIN]))]["coordinator"]
+    sensor = _entity_id(hass, "sensor", f"{UID_BASE}_feed_ends")
+    ends = start + timedelta(seconds=300)
+
+    def state():
+        return hass.states.get(sensor).state
+
+    async def poll(feed: dict, after: int) -> None:
+        freezer.tick(timedelta(seconds=after))
+        aioclient_mock.clear_requests()
+        aioclient_mock.get(f"{BASE_URL}/status.json", text=_status_json(feed))
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+    assert dt_util.parse_datetime(state()) == ends
+
+    # 30 s later the Apex says 271 s left: within the jitter, the end time stays put
+    await poll({"name": 1, "active": 271}, 30)
+    assert dt_util.parse_datetime(state()) == ends
+
+    # the feed was restarted: a new end time
+    await poll({"name": 1, "active": 300}, 30)
+    assert dt_util.parse_datetime(state()) == ends + timedelta(seconds=60)
+
+    await poll({"name": 0, "active": 0}, 30)
+    assert state() == STATE_UNKNOWN
