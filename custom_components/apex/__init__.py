@@ -18,14 +18,17 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     CONF_TIMEOUT,
     DEFAULT_TIMEOUT,
+    CONF_READ_ONLY,
+    DEFAULT_READ_ONLY,
 )
 from .coordinator import ApexDataUpdateCoordinator
+from .entity import build_device
 from .rest import ApexRestClient
 from .const import CONF_LINE_VOLTAGE, DEFAULT_LINE_VOLTAGE, CONF_ENABLE_PER_OUTLET_POWER, \
     DEFAULT_ENABLE_PER_OUTLET_POWER
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-PLATFORMS: list[str] = ["sensor", "switch", "binary_sensor", "button"]
+PLATFORMS: list[str] = ["sensor", "switch", "binary_sensor", "button", "select", "update"]
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -41,24 +44,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     line_voltage = int(merged.get(CONF_LINE_VOLTAGE, DEFAULT_LINE_VOLTAGE))
     enable_per_outlet_power = bool(merged.get(CONF_ENABLE_PER_OUTLET_POWER, DEFAULT_ENABLE_PER_OUTLET_POWER))
+    read_only = bool(merged.get(CONF_READ_ONLY, DEFAULT_READ_ONLY))
 
     scan_interval = int(merged.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL))
     timeout_seconds = int(merged.get(CONF_TIMEOUT, DEFAULT_TIMEOUT))
 
-    coordinator = ApexDataUpdateCoordinator(
-        hass,
-        base_url=f"http://{ip}/cgi-bin",
-        username=username,
-        password=password,
-        name=f"Apex @ {ip}",
-        update_interval=timedelta(seconds=scan_interval),
-        timeout_seconds=timeout_seconds,
-    )
-    coordinator.line_voltage = line_voltage
-
-    await coordinator.async_config_entry_first_refresh()
-
-    # control (feed cycles) needs a REST login; reading works without a password
+    # the REST API needs a login; reading status.json works without a password
     rest: ApexRestClient | None = None
     if password:
         rest = ApexRestClient(
@@ -69,10 +60,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             timeout_seconds=timeout_seconds,
         )
 
+    coordinator = ApexDataUpdateCoordinator(
+        hass,
+        base_url=f"http://{ip}/cgi-bin",
+        username=username,
+        password=password,
+        name=f"Apex @ {ip}",
+        update_interval=timedelta(seconds=scan_interval),
+        timeout_seconds=timeout_seconds,
+        rest=rest,
+    )
+    coordinator.line_voltage = line_voltage
+
+    await coordinator.async_config_entry_first_refresh()
+
+    uid_base, device = build_device(coordinator, ip)
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "coordinator": coordinator,
         "rest": rest,
+        # control (outputs, feed cycles, programs, firmware) needs a login and isn't read-only
+        "control": rest if not read_only else None,
+        "read_only": read_only,
         "ip": ip,
+        "uid_base": uid_base,
+        "device": device,
         "line_voltage": line_voltage,
         "enable_per_outlet_power": enable_per_outlet_power,
     }

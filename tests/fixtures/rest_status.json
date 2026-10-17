@@ -1,0 +1,1006 @@
+{
+ "system": {
+  "hostname": "apex",
+  "software": "5.15_6B26",
+  "hardware": "1.0",
+  "serial": "AC5:12345",
+  "type": "AC5",
+  "extra": {
+   "sdver": "SS08G,3,5344,2,0",
+   "sddate": "181001",
+   "sdserial": 0,
+   "sdextDate": "",
+   "sdhealth": 0,
+   "WWWVer": "PASS",
+   "TmpUart": "PASS",
+   "pH2Uart": "PASS",
+   "CondUart": "PASS",
+   "sdstat": {
+    "reads": 34120279,
+    "readErr": 0,
+    "readErrPct": 0.0,
+    "writes": 49273,
+    "writeErr": 0,
+    "writeErrPct": 0.0
+   }
+  },
+  "timezone": "-7.00",
+  "date": 1792270744
+ },
+ "modules": [
+  {
+   "abaddr": 1,
+   "hwtype": "Disp",
+   "name": "Disp_1",
+   "hwrev": 1,
+   "swrev": 11,
+   "swstat": "OK",
+   "pcount": 46555891,
+   "pgood": 46555880,
+   "perror": 10,
+   "reatt": 2,
+   "inact": 0,
+   "boot": false,
+   "present": true,
+   "extra": {}
+  },
+  {
+   "abaddr": 2,
+   "hwtype": "EB8",
+   "name": "EB8_DOWN2",
+   "hwrev": 1,
+   "swrev": 12,
+   "swstat": "OK",
+   "pcount": 4254993,
+   "pgood": 4254987,
+   "perror": 6,
+   "reatt": 2,
+   "inact": 0,
+   "boot": false,
+   "present": true,
+   "extra": {}
+  },
+  {
+   "abaddr": 3,
+   "hwtype": "FMM",
+   "name": "FMM",
+   "hwrev": 1,
+   "swrev": 24,
+   "swstat": "OK",
+   "pcount": 4255027,
+   "pgood": 4255021,
+   "perror": 6,
+   "reatt": 0,
+   "inact": 0,
+   "boot": false,
+   "present": true,
+   "extra": {}
+  },
+  {
+   "abaddr": 4,
+   "hwtype": "DOS",
+   "name": "DOS",
+   "hwrev": 1,
+   "swrev": 12,
+   "swstat": "OK",
+   "pcount": 4254985,
+   "pgood": 4254959,
+   "perror": 26,
+   "reatt": 8,
+   "inact": 0,
+   "boot": false,
+   "present": true,
+   "extra": {
+    "status": []
+   }
+  },
+  {
+   "abaddr": 5,
+   "hwtype": "TRI",
+   "name": "TRI",
+   "hwrev": 1,
+   "swrev": 23,
+   "swstat": "OK",
+   "pcount": 4254949,
+   "pgood": 4254921,
+   "perror": 28,
+   "reatt": 10,
+   "inact": 0,
+   "boot": false,
+   "present": true,
+   "extra": {
+    "temp": 517,
+    "errorCode": 0,
+    "errorMask": 65535,
+    "status": "idle",
+    "lastCal": 1777699980,
+    "resetTime": [
+     1790644775,
+     1706415459,
+     1788561641,
+     1788561641,
+     1790644775
+    ],
+    "levels": [
+     997.4,
+     1553.4,
+     76.48,
+     73.15,
+     111.28
+    ]
+   }
+  },
+  {
+   "abaddr": 8,
+   "hwtype": "PM1",
+   "name": "PM1_8",
+   "hwrev": 1,
+   "swrev": 7,
+   "swstat": "OK",
+   "pcount": 4255007,
+   "pgood": 4255002,
+   "perror": 5,
+   "reatt": 2,
+   "inact": 0,
+   "boot": false,
+   "present": true,
+   "extra": {}
+  },
+  {
+   "abaddr": 14,
+   "hwtype": "EB8",
+   "name": "EB8_DOWN1",
+   "hwrev": 1,
+   "swrev": 12,
+   "swstat": "OK",
+   "pcount": 4254993,
+   "pgood": 4254988,
+   "perror": 5,
+   "reatt": 2,
+   "inact": 0,
+   "boot": false,
+   "present": true,
+   "extra": {}
+  },
+  {
+   "abaddr": 16,
+   "hwtype": "PM2",
+   "name": "PM2_16",
+   "hwrev": 1,
+   "swrev": 3,
+   "swstat": "OK",
+   "pcount": 4254200,
+   "pgood": 3772299,
+   "perror": 481901,
+   "reatt": 1462,
+   "inact": 0,
+   "boot": false,
+   "present": true,
+   "extra": {}
+  },
+  {
+   "abaddr": 18,
+   "hwtype": "EB8",
+   "name": "EB8_Tank",
+   "hwrev": 1,
+   "swrev": 12,
+   "swstat": "OK",
+   "pcount": 4232322,
+   "pgood": 4232312,
+   "perror": 10,
+   "reatt": 4,
+   "inact": 0,
+   "boot": false,
+   "present": true,
+   "extra": {}
+  },
+  {
+   "abaddr": 20,
+   "hwtype": "AFS",
+   "name": "AFS",
+   "hwrev": 1,
+   "swrev": 2,
+   "swstat": "OK",
+   "pcount": 4232322,
+   "pgood": 4232306,
+   "perror": 16,
+   "reatt": 8,
+   "inact": 0,
+   "boot": false,
+   "present": true,
+   "extra": {}
+  },
+  {
+   "abaddr": 21,
+   "hwtype": "ALD",
+   "name": "ALD",
+   "hwrev": 1,
+   "swrev": 7,
+   "swstat": "OK",
+   "pcount": 4232336,
+   "pgood": 4232326,
+   "perror": 10,
+   "reatt": 4,
+   "inact": 0,
+   "boot": false,
+   "present": true,
+   "extra": {}
+  }
+ ],
+ "nstat": {
+  "dhcp": true,
+  "hostname": "apex",
+  "ipaddr": "1.2.3.4",
+  "netmask": "255.255.255.0",
+  "gateway": "1.2.3.1",
+  "dns": [
+   "1.2.3.1",
+   "0.0.0.0"
+  ],
+  "httpPort": 80,
+  "fusionEnable": true,
+  "quality": 0,
+  "strength": 0,
+  "link": false,
+  "wifiAPLock": false,
+  "wifiEnable": false,
+  "wifiAPPassword": "",
+  "ssid": "",
+  "wifiAP": false,
+  "updateFirmware": false,
+  "latestFirmware": "5.15_6B26"
+ },
+ "feed": {
+  "name": 0,
+  "active": 0
+ },
+ "power": {
+  "failed": 1791151492,
+  "restored": 1791151497
+ },
+ "outputs": [
+  {
+   "status": [
+    "PF1",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "VarSpd1_I1",
+   "gid": "",
+   "type": "variable",
+   "ID": 0,
+   "did": "base_Var1"
+  },
+  {
+   "status": [
+    "PF2",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "VarSpd2_I2",
+   "gid": "",
+   "type": "variable",
+   "ID": 1,
+   "did": "base_Var2"
+  },
+  {
+   "status": [
+    "PF3",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "VarSpd3_I3",
+   "gid": "",
+   "type": "variable",
+   "ID": 2,
+   "did": "base_Var3"
+  },
+  {
+   "status": [
+    "PF4",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "VarSpd4_I4",
+   "gid": "",
+   "type": "variable",
+   "ID": 3,
+   "did": "base_Var4"
+  },
+  {
+   "status": [
+    "AOF",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "SndAlm_I6",
+   "gid": "",
+   "type": "alert",
+   "ID": 4,
+   "did": "base_Alarm"
+  },
+  {
+   "status": [
+    "AOF",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "SndWrn_I7",
+   "gid": "",
+   "type": "alert",
+   "ID": 5,
+   "did": "base_Warn"
+  },
+  {
+   "status": [
+    "AOF",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "EmailAlarm",
+   "gid": "",
+   "type": "alert",
+   "ID": 6,
+   "did": "base_email"
+  },
+  {
+   "status": [
+    "OFF",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "CalcFeedPump",
+   "gid": "",
+   "type": "outlet",
+   "ID": 8,
+   "did": "2_1"
+  },
+  {
+   "status": [
+    "ON",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "DOS",
+   "gid": "",
+   "type": "outlet",
+   "ID": 9,
+   "did": "2_2"
+  },
+  {
+   "status": [
+    "AOF",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Pump_Calc",
+   "gid": "",
+   "type": "outlet",
+   "ID": 10,
+   "did": "2_3"
+  },
+  {
+   "status": [
+    "AOF",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Pump_Alk",
+   "gid": "",
+   "type": "outlet",
+   "ID": 11,
+   "did": "2_4"
+  },
+  {
+   "status": [
+    "AOF",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Heater_2",
+   "gid": "",
+   "type": "outlet",
+   "ID": 12,
+   "did": "2_5"
+  },
+  {
+   "status": [
+    "OFF",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Pump_Tank",
+   "gid": "",
+   "type": "outlet",
+   "ID": 13,
+   "did": "2_6"
+  },
+  {
+   "status": [
+    "OFF",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Pump_Salt",
+   "gid": "",
+   "type": "outlet",
+   "ID": 14,
+   "did": "2_7"
+  },
+  {
+   "status": [
+    "OFF",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Pump_Fresh",
+   "gid": "",
+   "type": "outlet",
+   "ID": 15,
+   "did": "2_8"
+  },
+  {
+   "status": [
+    "AOF",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "LinkA_3_1",
+   "gid": "",
+   "type": "24v",
+   "ID": 16,
+   "did": "3_1"
+  },
+  {
+   "status": [
+    "OFF",
+    "",
+    "OK",
+    "2000",
+    "0"
+   ],
+   "name": "DOS_DEL",
+   "gid": "doser_4",
+   "type": "dos",
+   "ID": 22,
+   "did": "4_1"
+  },
+  {
+   "status": [
+    "OFF",
+    "",
+    "OK",
+    "2000",
+    "0"
+   ],
+   "name": "DOS_ADD",
+   "gid": "doser_4",
+   "type": "dos",
+   "ID": 23,
+   "did": "4_2"
+  },
+  {
+   "status": [
+    "AOF",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Trident_5_3",
+   "gid": "",
+   "type": "selector",
+   "ID": 24,
+   "did": "5_3"
+  },
+  {
+   "status": [
+    "AOF",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Alk_5_4",
+   "gid": "",
+   "type": "selector",
+   "ID": 25,
+   "did": "5_4"
+  },
+  {
+   "status": [
+    "AOF",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Alarm_3_2",
+   "gid": "",
+   "type": "alert",
+   "ID": 26,
+   "did": "3_2"
+  },
+  {
+   "status": [
+    "OFF",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Light_Sump",
+   "gid": "",
+   "type": "outlet",
+   "ID": 42,
+   "did": "14_1"
+  },
+  {
+   "status": [
+    "ON",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Pump_GFO",
+   "gid": "",
+   "type": "outlet",
+   "ID": 43,
+   "did": "14_2"
+  },
+  {
+   "status": [
+    "AON",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "PUMP_RETURN",
+   "gid": "",
+   "type": "outlet",
+   "ID": 44,
+   "did": "14_3"
+  },
+  {
+   "status": [
+    "ON",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Trident",
+   "gid": "",
+   "type": "outlet",
+   "ID": 45,
+   "did": "14_4"
+  },
+  {
+   "status": [
+    "AOF",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Heaters",
+   "gid": "",
+   "type": "outlet",
+   "ID": 46,
+   "did": "14_5"
+  },
+  {
+   "status": [
+    "OFF",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "C02",
+   "gid": "",
+   "type": "outlet",
+   "ID": 47,
+   "did": "14_6"
+  },
+  {
+   "status": [
+    "ON",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "CO2_FEEDER",
+   "gid": "",
+   "type": "outlet",
+   "ID": 48,
+   "did": "14_7"
+  },
+  {
+   "status": [
+    "ON",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "CO2_REACTOR",
+   "gid": "",
+   "type": "outlet",
+   "ID": 49,
+   "did": "14_8"
+  },
+  {
+   "status": [
+    "AON",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Light_R",
+   "gid": "",
+   "type": "outlet",
+   "ID": 52,
+   "did": "18_1"
+  },
+  {
+   "status": [
+    "AON",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Light_L",
+   "gid": "",
+   "type": "outlet",
+   "ID": 53,
+   "did": "18_2"
+  },
+  {
+   "status": [
+    "AON",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Light_C",
+   "gid": "",
+   "type": "outlet",
+   "ID": 54,
+   "did": "18_3"
+  },
+  {
+   "status": [
+    "ON",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Light_Stand",
+   "gid": "",
+   "type": "outlet",
+   "ID": 55,
+   "did": "18_4"
+  },
+  {
+   "status": [
+    "ON",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Vortex_R",
+   "gid": "",
+   "type": "outlet",
+   "ID": 56,
+   "did": "18_5"
+  },
+  {
+   "status": [
+    "ON",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Vortex_L",
+   "gid": "",
+   "type": "outlet",
+   "ID": 57,
+   "did": "18_6"
+  },
+  {
+   "status": [
+    "ON",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Open",
+   "gid": "",
+   "type": "outlet",
+   "ID": 58,
+   "did": "18_7"
+  },
+  {
+   "status": [
+    "ON",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Open",
+   "gid": "",
+   "type": "outlet",
+   "ID": 59,
+   "did": "18_8"
+  },
+  {
+   "status": [
+    "AOF",
+    "",
+    "OK",
+    ""
+   ],
+   "name": "Feeder",
+   "gid": "",
+   "type": "afs",
+   "ID": 61,
+   "did": "20_1"
+  }
+ ],
+ "inputs": [
+  {
+   "did": "base_Temp",
+   "type": "Temp",
+   "name": "Tmp",
+   "value": 79.5
+  },
+  {
+   "did": "base_pH",
+   "type": "pH",
+   "name": "pH",
+   "value": 8.13
+  },
+  {
+   "did": "base_pH2",
+   "type": "pH",
+   "name": "pH2",
+   "value": 8.15
+  },
+  {
+   "did": "base_Cond",
+   "type": "Cond",
+   "name": "Salt",
+   "value": 33.4
+  },
+  {
+   "did": "2_0",
+   "type": "Amps",
+   "name": "Amp_2",
+   "value": 1.0
+  },
+  {
+   "did": "5_0",
+   "type": "alk",
+   "name": "Alkx5",
+   "value": 9.33
+  },
+  {
+   "did": "5_1",
+   "type": "ca",
+   "name": "Cax5",
+   "value": 453
+  },
+  {
+   "did": "5_2",
+   "type": "mg",
+   "name": "Mgx5",
+   "value": 1341
+  },
+  {
+   "did": "8_0",
+   "type": "Temp",
+   "name": "Tmpx8",
+   "value": 20.7
+  },
+  {
+   "did": "8_1",
+   "type": "pH",
+   "name": "pHx8",
+   "value": 7.51
+  },
+  {
+   "did": "14_0",
+   "type": "Amps",
+   "name": "Amp_14",
+   "value": 6.8
+  },
+  {
+   "did": "16_0",
+   "type": "Temp",
+   "name": "Tmp2",
+   "value": 80.3
+  },
+  {
+   "did": "16_1",
+   "type": "Cond",
+   "name": "Salt2",
+   "value": 32.5
+  },
+  {
+   "did": "18_0",
+   "type": "Amps",
+   "name": "Amp_18",
+   "value": 3.7
+  },
+  {
+   "did": "base_I1",
+   "name": "Sw1",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "base_I2",
+   "name": "Sw2",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "base_I3",
+   "name": "Sw3",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "base_I4",
+   "name": "Sw4",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "base_I5",
+   "name": "Sw5",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "base_I6",
+   "name": "Sw6",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "3_I1",
+   "name": "Swx3_1",
+   "type": "digital",
+   "value": 200
+  },
+  {
+   "did": "3_I2",
+   "name": "Swx3_2",
+   "type": "digital",
+   "value": 200
+  },
+  {
+   "did": "3_I3",
+   "name": "Swx3_3",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "3_I4",
+   "name": "Swx3_4",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "8_I1",
+   "name": "Swx8_1",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "8_I2",
+   "name": "Swx8_2",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "8_I3",
+   "name": "Swx8_3",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "8_I4",
+   "name": "Swx8_4",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "8_I5",
+   "name": "Swx8_5",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "8_I6",
+   "name": "Swx8_6",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "16_I1",
+   "name": "Swx16_1",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "16_I2",
+   "name": "Swx16_2",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "16_I3",
+   "name": "Swx16_3",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "16_I4",
+   "name": "Swx16_4",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "16_I5",
+   "name": "Swx16_5",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "16_I6",
+   "name": "Swx16_6",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "21_I1",
+   "name": "Swx21_1",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "21_I2",
+   "name": "Swx21_2",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "21_I3",
+   "name": "Swx21_3",
+   "type": "digital",
+   "value": 0
+  },
+  {
+   "did": "21_I4",
+   "name": "Swx21_4",
+   "type": "digital",
+   "value": 0
+  }
+ ],
+ "link": {
+  "linkState": 3,
+  "linkKey": "",
+  "link": false
+ }
+}

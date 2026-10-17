@@ -2,7 +2,12 @@
 from __future__ import annotations
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
-from homeassistant.const import UnitOfElectricCurrent
+from homeassistant.const import (
+    UnitOfElectricCurrent,
+    UnitOfElectricPotential,
+    UnitOfLength,
+    UnitOfPower,
+)
 
 
 def icon_for_type(probe_type: str, probe_name: str) -> str | None:
@@ -23,6 +28,16 @@ def icon_for_type(probe_type: str, probe_name: str) -> str | None:
         return "mdi:flask"
     if t == "mg":
         return "mdi:flask-outline"
+    if t == "orp":
+        return "mdi:test-tube"
+    if t == "pwr":
+        return "mdi:flash"
+    if t == "volts":
+        return "mdi:sine-wave"
+    if t == "in":
+        return "mdi:waves-arrow-up"
+    if t == "gph":
+        return "mdi:waves-arrow-right"
     return "mdi:gauge"
 
 
@@ -63,5 +78,17 @@ def units_and_meta(
         return ("ppt" if n.startswith("salt") else None), None, SensorStateClass.MEASUREMENT
     if t == "temp":
         return temp_unit(value, configured_temp_unit), SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT
+    if t == "orp":
+        return UnitOfElectricPotential.MILLIVOLT, None, SensorStateClass.MEASUREMENT
+    if t == "pwr":
+        return UnitOfPower.WATT, SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT
+    if t == "volts":
+        return UnitOfElectricPotential.VOLT, SensorDeviceClass.VOLTAGE, SensorStateClass.MEASUREMENT
+    if t == "in":
+        # liquid level sensor (LLS) set to inches
+        return UnitOfLength.INCHES, SensorDeviceClass.DISTANCE, SensorStateClass.MEASUREMENT
+    if t == "gph":
+        # flow sensor; no device class, since older Home Assistant doesn't know gal/h
+        return "gal/h", None, SensorStateClass.MEASUREMENT
 
     return None, None, SensorStateClass.MEASUREMENT

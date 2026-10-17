@@ -20,6 +20,7 @@ CONF_TIMEOUT = "timeout"                    # seconds
 CONF_AMPS_DIAGNOSTIC = "amps_diagnostic"    # bool (mark Amp_* as diagnostic)
 CONF_LINE_VOLTAGE = "line_voltage"          # volts (for total power W = A * V)
 CONF_ENABLE_PER_OUTLET_POWER = "enable_per_outlet_power"
+CONF_READ_ONLY = "read_only"                # bool: monitor only, never change the Apex
 
 
 # Defaults
@@ -32,3 +33,4 @@ DEFAULT_TIMEOUT = 10            # seconds
 DEFAULT_AMPS_DIAGNOSTIC = True  # keep Current/Amp_* under Diagnostic by default
 DEFAULT_LINE_VOLTAGE = 120      # US default; set 230 for EU
 DEFAULT_ENABLE_PER_OUTLET_POWER = False
+DEFAULT_READ_ONLY = False

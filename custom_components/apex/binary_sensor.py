@@ -1,48 +1,45 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 from __future__ import annotations
 
-from homeassistant.components.binary_sensor import BinarySensorEntity
+from typing import Any
+
+from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.apex.const import DOMAIN
 from custom_components.apex.coordinator import ApexDataUpdateCoordinator
-from custom_components.apex.parsing import one_apex_prefix, safe_uid_base
+from custom_components.apex.entity import ApexEntity
+
+# a status[2] that isn't an error (DOS and pumps report e.g. "Volt" there when something is wrong)
+OUTPUT_OK = (None, "", "OK")
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
     ctx = hass.data[DOMAIN][entry.entry_id]
     coordinator: ApexDataUpdateCoordinator = ctx["coordinator"]
-    ip: str = ctx["ip"]
-
-    meta = (coordinator.data or {}).get("meta", {}) or {}
-    serial = (meta.get("serial") or "").strip()
-    uid_base = safe_uid_base(serial) or safe_uid_base(ip)
-
-    device = DeviceInfo(
-        identifiers={(DOMAIN, uid_base)},
-        name=f"Apex @ {ip}",
-        manufacturer="Neptune Systems",
-        model="Apex",
-        serial_number=(serial or None),
-        configuration_url=f"http://{ip}",
-        sw_version=(meta.get("software") or None),
-        hw_version=(meta.get("hardware") or None),
-    )
+    uid_base: str = ctx["uid_base"]
+    device: DeviceInfo = ctx["device"]
 
     added: set[str] = set()
 
     def _add_new():
-        inputs_now = (coordinator.data or {}).get("inputs", {}) or {}
-        new_entities: list[ApexDigitalInput] = []
+        data = coordinator.data or {}
+        inputs_now = data.get("inputs", {}) or {}
+        new_entities: list[BinarySensorEntity] = []
 
         for did in sorted(inputs_now):
             unique_id = f"{uid_base}_input_{did}".lower()
             if unique_id in added:
                 continue
-            label = one_apex_prefix(inputs_now[did].get("name") or did)
+            label = inputs_now[did].get("name") or did
             new_entities.append(ApexDigitalInput(coordinator, device, unique_id, label, did))
             added.add(unique_id)
+
+        # status.json reports output types; status.xml doesn't, so no alert outputs to watch there
+        alarm = ApexAlarm(coordinator, device, f"{uid_base}_alarm")
+        if alarm.unique_id not in added and any(o.get("type") for o in data.get("outlets", []) or []):
+            new_entities.append(alarm)
+            added.add(alarm.unique_id)
 
         if new_entities:
             # coordinator data is already fresh; update_before_add would poll the Apex again
@@ -54,7 +51,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     entry.async_on_unload(remove)
 
 
-class ApexDigitalInput(CoordinatorEntity[ApexDataUpdateCoordinator], BinarySensorEntity):
+class ApexDigitalInput(ApexEntity, BinarySensorEntity):
     """Apex switch input (float, optical, leak, ...). On means the circuit is CLOSED.
 
     No device class: what CLOSED means depends on the sensor and how it's mounted, so users
@@ -69,11 +66,8 @@ class ApexDigitalInput(CoordinatorEntity[ApexDataUpdateCoordinator], BinarySenso
         name: str,
         did: str,
     ):
-        super().__init__(coordinator)
+        super().__init__(coordinator, device_info, unique_id, name)
         self._did = did
-        self._attr_unique_id = unique_id
-        self._attr_name = name
-        self._attr_device_info = device_info
 
     def _input(self) -> dict:
         return ((self.coordinator.data or {}).get("inputs", {}) or {}).get(self._did) or {}
@@ -102,3 +96,42 @@ class ApexDigitalInput(CoordinatorEntity[ApexDataUpdateCoordinator], BinarySenso
             "apex_state": i.get("state"),
             "raw_value": i.get("value"),
         }
+
+
+class ApexAlarm(ApexEntity, BinarySensorEntity):
+    """On while any Apex alert output (email alarm, sound alarm, an FMM alarm, ...) is on.
+
+    The Apex doesn't say why it's alarming; the attributes list the alert outputs that are on
+    and outputs reporting an error (e.g. a DOS or pump with "Volt").
+    """
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+
+    def __init__(self, coordinator: ApexDataUpdateCoordinator, device_info: DeviceInfo, unique_id: str):
+        super().__init__(coordinator, device_info, unique_id, "Alarm")
+
+    def _outputs(self) -> list[dict[str, Any]]:
+        return (self.coordinator.data or {}).get("outlets", []) or []
+
+    def _active_alerts(self) -> list[str]:
+        return [
+            o["name"]
+            for o in self._outputs()
+            if (o.get("type") or "").lower() == "alert" and (o.get("state") or "").upper() in ("ON", "AON")
+        ]
+
+    def _output_errors(self) -> dict[str, str]:
+        errors: dict[str, str] = {}
+        for o in self._outputs():
+            status = o.get("status") or []
+            if len(status) > 2 and status[2] not in OUTPUT_OK:
+                errors[o["name"]] = status[2]
+        return errors
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self._active_alerts())
+
+    @property
+    def extra_state_attributes(self):
+        return {"active_alerts": self._active_alerts(), "output_errors": self._output_errors()}

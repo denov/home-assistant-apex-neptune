@@ -93,3 +93,11 @@ async def test_firmware_without_rest_login_can_still_be_added(hass: HomeAssistan
     result = await _start(hass)
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {**USER_INPUT, CONF_PASSWORD: "secret"})
     assert result["step_id"] == "confirm"
+
+
+def test_normalize_host():
+    from custom_components.apex.config_flow import normalize_host
+
+    assert normalize_host(" apex.local ") == "apex.local"
+    assert normalize_host("http://apex.local/") == "apex.local"
+    assert normalize_host("HTTP://192.168.1.50/cgi-bin/status.json") == "192.168.1.50"

@@ -1,0 +1,51 @@
+set_output:
+  target:
+    entity:
+      integration: apex
+      domain: select
+  fields:
+    setting:
+      required: true
+      example: "AUTO"
+      selector:
+        select:
+          options:
+            - "AUTO"
+            - "ON"
+            - "OFF"
+set_variable:
+  target:
+    entity:
+      integration: apex
+      domain: select
+  fields:
+    code:
+      required: true
+      example: "Set 75"
+      selector:
+        text:
+          multiline: true
+set_dos_rate:
+  target:
+    entity:
+      integration: apex
+      domain: select
+  fields:
+    profile_id:
+      required: true
+      example: 11
+      selector:
+        number:
+          min: 1
+          max: 32
+          mode: box
+    rate:
+      required: true
+      example: 1.2
+      selector:
+        number:
+          min: 0
+          max: 125
+          step: 0.1
+          unit_of_measurement: mL/min
+          mode: box

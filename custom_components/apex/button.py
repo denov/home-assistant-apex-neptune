@@ -1,44 +1,25 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 from __future__ import annotations
 
-import asyncio
-
-import aiohttp
 from homeassistant.components.button import ButtonEntity
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.apex.const import DOMAIN
 from custom_components.apex.coordinator import ApexDataUpdateCoordinator
-from custom_components.apex.parsing import one_apex_prefix, safe_uid_base
-from custom_components.apex.rest import FEED_LETTERS, ApexAuthError, ApexRestClient, ApexRestError
+from custom_components.apex.entity import ApexEntity, async_apex_command
+from custom_components.apex.rest import FEED_LETTERS, ApexRestClient
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
     ctx = hass.data[DOMAIN][entry.entry_id]
-    rest: ApexRestClient | None = ctx.get("rest")
+    rest: ApexRestClient | None = ctx.get("control")
     if rest is None:
-        # feed control needs a password (set it in the integration's options)
+        # feed control needs a password (set it in the integration's options) and not read-only
         return
 
     coordinator: ApexDataUpdateCoordinator = ctx["coordinator"]
-    ip: str = ctx["ip"]
-
-    meta = (coordinator.data or {}).get("meta", {}) or {}
-    serial = (meta.get("serial") or "").strip()
-    uid_base = safe_uid_base(serial) or safe_uid_base(ip)
-
-    device = DeviceInfo(
-        identifiers={(DOMAIN, uid_base)},
-        name=f"Apex @ {ip}",
-        manufacturer="Neptune Systems",
-        model="Apex",
-        serial_number=(serial or None),
-        configuration_url=f"http://{ip}",
-        sw_version=(meta.get("software") or None),
-        hw_version=(meta.get("hardware") or None),
-    )
+    uid_base: str = ctx["uid_base"]
+    device: DeviceInfo = ctx["device"]
 
     entities: list[ApexFeedButton] = [
         ApexFeedButton(coordinator, rest, device, uid_base, feed) for feed in FEED_LETTERS
@@ -47,7 +28,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     async_add_entities(entities)
 
 
-class ApexFeedButton(CoordinatorEntity[ApexDataUpdateCoordinator], ButtonEntity):
+class ApexFeedButton(ApexEntity, ButtonEntity):
     """Start feed cycle A-D, or cancel the running one (feed=None)."""
 
     def __init__(
@@ -58,20 +39,15 @@ class ApexFeedButton(CoordinatorEntity[ApexDataUpdateCoordinator], ButtonEntity)
         uid_base: str,
         feed: int | None,
     ):
-        super().__init__(coordinator)
-        self._rest = rest
-        self._feed = feed
-        self._attr_device_info = device_info
-
         if feed is None:
-            self._attr_name = one_apex_prefix("Cancel Feed")
-            self._attr_unique_id = f"{uid_base}_feed_cancel"
+            super().__init__(coordinator, device_info, f"{uid_base}_feed_cancel", "Cancel Feed")
             self._attr_icon = "mdi:fish-off"
         else:
             letter = FEED_LETTERS[feed]
-            self._attr_name = one_apex_prefix(f"Feed {letter}")
-            self._attr_unique_id = f"{uid_base}_feed_{letter}".lower()
+            super().__init__(coordinator, device_info, f"{uid_base}_feed_{letter}".lower(), f"Feed {letter}")
             self._attr_icon = "mdi:fish"
+        self._rest = rest
+        self._feed = feed
 
     @property
     def available(self) -> bool:
@@ -79,18 +55,9 @@ class ApexFeedButton(CoordinatorEntity[ApexDataUpdateCoordinator], ButtonEntity)
         return True
 
     async def async_press(self) -> None:
-        try:
-            if self._feed is None:
-                await self._rest.async_cancel_feed()
-            else:
-                await self._rest.async_start_feed(self._feed)
-        except ApexAuthError as err:
-            raise HomeAssistantError(
-                f"{err}. Update the password in the Apex integration's options."
-            ) from err
-        except (ApexRestError, aiohttp.ClientError, asyncio.TimeoutError) as err:
-            action = "cancel the feed" if self._feed is None else f"start feed {FEED_LETTERS[self._feed]}"
-            raise HomeAssistantError(f"Couldn't {action} on the Apex: {err}") from err
-
-        # show the new feed state now: async_request_refresh is debounced and can lag ~10s
-        await self.coordinator.async_refresh()
+        if self._feed is None:
+            await async_apex_command(self.coordinator, "cancel the feed", self._rest.async_cancel_feed())
+        else:
+            await async_apex_command(
+                self.coordinator, f"start feed {FEED_LETTERS[self._feed]}", self._rest.async_start_feed(self._feed)
+            )

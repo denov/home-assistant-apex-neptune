@@ -38,6 +38,16 @@ def pretty_type(probe_name: str, probe_type: str) -> str:
         return "Calcium"
     if t == "mg":
         return "Magnesium"
+    if t == "orp":
+        return "ORP"
+    if t == "pwr":
+        return "Power"
+    if t == "volts":
+        return "Voltage"
+    if t == "in":
+        return "Level"
+    if t == "gph":
+        return "Flow"
 
     return probe_type.strip() if probe_type else probe_name
 
@@ -70,6 +80,11 @@ def build_labels(
     counts: dict[str, int] = {}
     for base in base_for.values():
         counts[base] = counts.get(base, 0) + 1
+    # probes that would get the very same label
+    unsuffixed: dict[str, int] = {}
+    for probe_name, base in base_for.items():
+        if not suffix_for.get(probe_name):
+            unsuffixed[base] = unsuffixed.get(base, 0) + 1
 
     labels: dict[str, str] = {}
     for probe_name, base in base_for.items():
@@ -80,21 +95,17 @@ def build_labels(
         typ = (probes.get(probe_name, {}).get("type") or "").strip().lower()
         suffix = suffix_for.get(probe_name) or ""
 
-        if typ == "amps":
-            labels[probe_name] = f"{base} {suffix}".strip() if suffix else base
+        if typ == "amps" and suffix:
+            labels[probe_name] = f"{base} {suffix}"
         elif counts.get(base, 0) > 1 and suffix:
             labels[probe_name] = f"{base} ({suffix})" if suffix.startswith("x") else f"{base} {suffix}"
+        elif unsuffixed.get(base, 0) > 1:
+            # e.g. per-outlet power on an EB832 ("Return_2_3W"): the Apex name is the best label
+            labels[probe_name] = probes.get(probe_name, {}).get("name") or probe_name
         else:
             labels[probe_name] = base
 
     return labels
-
-
-def one_apex_prefix(name: str) -> str:
-    raw = (name or "").strip()
-    if raw.lower().startswith("apex "):
-        raw = raw[5:].lstrip()
-    return f"Apex {raw}"
 
 
 def safe_uid_base(s: str) -> str:

@@ -34,8 +34,10 @@ def test_json_matches_xml():
         assert j["probes"][name]["value"] == probe["value"]
 
     # status.xml also lists a virtual email alarm output that status.json leaves out
-    xml_outlets = {o["output_id"]: o for o in x["outlets"] if o["name"] != "Email2Alm_I9"}
-    assert {o["output_id"]: o for o in j["outlets"]} == xml_outlets
+    # status.xml has only the state of each output; status.json has its type and full status too
+    shared = ("name", "output_id", "state", "device_id")
+    xml_outlets = {o["output_id"]: {k: o[k] for k in shared} for o in x["outlets"] if o["name"] != "Email2Alm_I9"}
+    assert {o["output_id"]: {k: o[k] for k in shared} for o in j["outlets"]} == xml_outlets
 
 
 def test_json_meta_and_power():
@@ -61,7 +63,16 @@ def test_json_probes_and_outlets():
     assert not any(p["type"] == "digital" for p in data["probes"].values())
 
     outlets = {o["output_id"]: o for o in data["outlets"]}
-    assert outlets["9"] == {"name": "DOS", "output_id": "9", "state": "ON", "device_id": outlets["9"]["device_id"]}
+    assert outlets["9"] == {
+        "name": "DOS",
+        "output_id": "9",
+        "state": "ON",
+        "device_id": "2_2",
+        "type": "outlet",
+        "gid": None,
+        "status": ["ON", None, "OK", None],
+        "intensity": None,
+    }
     assert outlets["0"]["state"] == "PF1"
 
 
@@ -129,3 +140,53 @@ def test_json_feed_state():
     running = json.dumps({"istat": {"feed": {"name": 1, "active": 299}}})
     assert _parse_status_json(running)["feed"] == {"name": 1, "active": 299}
     assert _parse_status_json('{"istat": {}}')["feed"] is None
+
+
+def test_json_probes_with_the_same_name():
+    """Two inputs with one name (e.g. two "Leak" probes) both become probes."""
+    data = _parse_status_json(
+        _status_json(
+            [
+                {"did": "1_P1", "type": "in", "name": "Leak", "value": 1},
+                {"did": "1_P2", "type": "in", "name": "Leak", "value": 2},
+            ]
+        )
+    )
+    assert data["probes"]["Leak"]["value"] == 1
+    assert data["probes"]["Leak_1_P2"] == {"name": "Leak", "value": 2.0, "value_raw": "2", "type": "in"}
+
+
+def test_labels_for_per_outlet_power():
+    from custom_components.apex.parsing import build_labels
+
+    probes = {
+        "Tmp": {"name": "Tmp", "type": "Temp"},
+        "Tmp2": {"name": "Tmp2", "type": "Temp"},
+        "Return_2_1W": {"name": "Return_2_1W", "type": "pwr"},
+        "Skimmer_2_2W": {"name": "Skimmer_2_2W", "type": "pwr"},
+        "ORP": {"name": "ORP", "type": "ORP"},
+    }
+    assert build_labels(probes, {}) == {
+        "Tmp": "Temp",
+        "Tmp2": "Temp 2",
+        "Return_2_1W": "Return_2_1W",
+        "Skimmer_2_2W": "Skimmer_2_2W",
+        "ORP": "ORP",
+    }
+
+
+@pytest.mark.parametrize(
+    ("prog", "expected"),
+    [
+        ("Set 75\n", 75),
+        ("Set 12.5", 12.5),
+        ("Set PF1\n", "PF1"),
+        ("Fallback OFF\nSet 75\n", None),
+        ("If Tmp > 80 Then OFF", None),
+        (None, None),
+    ],
+)
+def test_program_setting(prog, expected):
+    from custom_components.apex.sensor import program_setting
+
+    assert program_setting(prog) == expected

@@ -31,6 +31,8 @@ from .const import (
     # optional:
     CONF_ENABLE_PER_OUTLET_POWER,
     DEFAULT_ENABLE_PER_OUTLET_POWER,
+    CONF_READ_ONLY,
+    DEFAULT_READ_ONLY,
 )
 from .coordinator import async_fetch_status
 from .rest import ApexAuthError, ApexRestClient
@@ -70,6 +72,16 @@ LINE_VOLTAGE_SELECTOR = selector.NumberSelector(
 
 AMPS_DIAGNOSTIC_SELECTOR = selector.BooleanSelector()
 PER_OUTLET_POWER_SELECTOR = selector.BooleanSelector()
+READ_ONLY_SELECTOR = selector.BooleanSelector()
+
+
+def normalize_host(host: str) -> str:
+    """apex.local or an IP address, also when pasted as a URL (http://apex.local/)."""
+    host = (host or "").strip()
+    for prefix in ("http://", "https://"):
+        if host.lower().startswith(prefix):
+            host = host[len(prefix):]
+    return host.split("/", 1)[0]
 
 
 def _schema_user():
@@ -116,6 +128,8 @@ def _schema_options(merged: dict):
 
             # optional:
             vol.Optional(CONF_ENABLE_PER_OUTLET_POWER, default=bool(merged.get(CONF_ENABLE_PER_OUTLET_POWER, DEFAULT_ENABLE_PER_OUTLET_POWER))): PER_OUTLET_POWER_SELECTOR,
+
+            vol.Optional(CONF_READ_ONLY, default=bool(merged.get(CONF_READ_ONLY, DEFAULT_READ_ONLY))): READ_ONLY_SELECTOR,
         }
     )
 
@@ -132,6 +146,7 @@ class ApexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._error = None
 
         if user_input is not None:
+            user_input = {**user_input, CONF_IP_ADDRESS: normalize_host(user_input[CONF_IP_ADDRESS])}
             ip = user_input[CONF_IP_ADDRESS]
             await self.async_set_unique_id(ip)
             self._abort_if_unique_id_configured()
@@ -217,6 +232,7 @@ class ApexOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input=None):
         if user_input is not None:
+            user_input = {**user_input, CONF_IP_ADDRESS: normalize_host(user_input[CONF_IP_ADDRESS])}
             return self.async_create_entry(title="", data=user_input)
 
         merged = {**self._entry.data, **self._entry.options}

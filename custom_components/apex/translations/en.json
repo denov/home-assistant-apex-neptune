@@ -5,21 +5,98 @@
         "title": "Apex Monitor Setup",
         "description": "Enter your Neptune Apex connection info",
         "data": {
-          "ip_address": "Apex IP Address",
+          "ip_address": "Apex host or IP address",
           "username": "Username",
           "password": "Password"
         },
         "data_description": {
-          "password": "Optional for monitoring. Needed for the feed cycle buttons."
+          "ip_address": "For example 192.168.1.50 or apex.local",
+          "password": "Optional for monitoring. Needed to control outputs and feed cycles, and for Trident levels and firmware updates."
         }
+      },
+      "confirm": {
+        "title": "Apex found",
+        "description": "{info}"
       }
     },
     "error": {
-      "cannot_connect": "Couldn't reach the Apex. Check the IP address.",
+      "cannot_connect": "Couldn't reach the Apex. Check the host or IP address.",
       "invalid_auth": "The Apex rejected the username or password."
     },
     "abort": {
       "already_configured": "This Apex is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Apex options",
+        "data": {
+          "ip_address": "Apex host or IP address",
+          "username": "Username",
+          "password": "Password",
+          "temp_unit": "Temperature unit",
+          "scan_interval": "Update interval",
+          "timeout": "Timeout",
+          "amps_diagnostic": "Show current (Amps) probes as diagnostics",
+          "line_voltage": "Line voltage",
+          "enable_per_outlet_power": "Energy sensors for outlets that measure power",
+          "read_only": "Read-only"
+        },
+        "data_description": {
+          "password": "Needed to control outputs and feed cycles, and for Trident levels and firmware updates.",
+          "line_voltage": "Used for Total Power (total current × voltage). 120 in North America, 230 in most other places.",
+          "enable_per_outlet_power": "Adds an energy (kWh) sensor for each outlet on an energy bar that reports watts (EB832).",
+          "read_only": "Monitor only: no control entities or actions, even with a password."
+        }
+      }
+    }
+  },
+  "entity": {
+    "select": {
+      "output_mode": {
+        "state": {
+          "auto": "Auto",
+          "on": "On",
+          "off": "Off"
+        }
+      }
+    }
+  },
+  "services": {
+    "set_output": {
+      "name": "Set output",
+      "description": "Sets an Apex output to Auto (its program runs it), On or Off. Target the output's Mode entity.",
+      "fields": {
+        "setting": {
+          "name": "Setting",
+          "description": "AUTO, ON or OFF."
+        }
+      }
+    },
+    "set_variable": {
+      "name": "Set program",
+      "description": "Replaces an output's program, for example \"Set 75\" for a variable-speed pump at 75%. The output becomes an Advanced output. Target the output's Mode entity.",
+      "fields": {
+        "code": {
+          "name": "Program",
+          "description": "Apex program code, for example \"Set 75\"."
+        }
+      }
+    },
+    "set_dos_rate": {
+      "name": "Set DOS rate",
+      "description": "Runs a DOS or DQD pump continuously at a rate in mL per minute, using a profile the integration takes over and renames Dose_<device id>. 0 turns the pump off. Target the pump's Mode entity.",
+      "fields": {
+        "profile_id": {
+          "name": "Profile",
+          "description": "Number (1-32) of an Apex profile to overwrite for this pump."
+        },
+        "rate": {
+          "name": "Rate",
+          "description": "mL per minute (0-125)."
+        }
+      }
     }
   }
 }

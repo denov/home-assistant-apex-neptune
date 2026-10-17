@@ -115,3 +115,31 @@ async def test_login_without_session(hass: HomeAssistant, aioclient_mock) -> Non
 
     with pytest.raises(ApexRestError):
         await _client(hass).async_login()
+
+
+async def test_get_logs_in_again_when_the_session_expires(hass: HomeAssistant, aioclient_mock) -> None:
+    """After the Apex reboots, reads must keep working (upstream issue: lost connection until reload)."""
+    aioclient_mock.post(LOGIN_URL, json={"connect.sid": "sid-1"})
+    responses = iter([{"status": 401}, {"json": {"modules": []}}])
+
+    async def status(method, url, data):
+        return AiohttpClientMockResponse(method, url, **next(responses))
+
+    aioclient_mock.get(f"{HOST_URL}/rest/status", side_effect=status)
+    client = _client(hass)
+    client._sid = "expired"
+
+    assert await client.async_get_status() == {"modules": []}
+    assert len(_calls(aioclient_mock, "POST", "/rest/login")) == 1
+
+
+@pytest.mark.parametrize(("rate", "mode"), [(1.2, 21), (3.5, 21), (5, 20), (30, 18), (125, 16)])
+def test_dos_profile_mode(rate, mode):
+    from custom_components.apex.rest import dos_profile_mode
+
+    assert dos_profile_mode(rate) == mode
+
+
+async def test_set_output_rejects_unknown_mode(hass: HomeAssistant) -> None:
+    with pytest.raises(ValueError):
+        await _client(hass).async_set_output("2_2", "TOGGLE")

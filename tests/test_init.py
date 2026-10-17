@@ -53,7 +53,10 @@ async def test_setup_from_status_json(hass: HomeAssistant, aioclient_mock) -> No
     assert entry.state is ConfigEntryState.LOADED
     assert _requested(aioclient_mock, "status.xml") == 0
 
-    assert len(_entities(hass, entry, "binary_sensor")) == 26
+    # 26 digital inputs and the Apex alarm
+    inputs = [e for e in _entities(hass, entry, "binary_sensor") if "_input_" in e.unique_id]
+    assert len(inputs) == 26
+    assert _state(hass, "binary_sensor", f"{UID_BASE}_alarm").state == STATE_OFF
     sw1 = _state(hass, "binary_sensor", f"{UID_BASE}_input_base_i1")
     assert sw1.state == STATE_OFF
     assert sw1.attributes["apex_state"] == "OPEN"
