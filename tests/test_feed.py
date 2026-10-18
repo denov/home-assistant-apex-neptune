@@ -89,6 +89,23 @@ async def test_press_with_wrong_password(hass: HomeAssistant, aioclient_mock) ->
     assert _puts(aioclient_mock) == []
 
 
+async def test_password_rejected_on_press_asks_for_it_again(hass: HomeAssistant, aioclient_mock) -> None:
+    """The password changed on the Apex after setup: pressing a button prompts for it."""
+    aioclient_mock.post(f"{HOST_URL}/rest/login", json={"connect.sid": "sid-1"})
+    await _setup(hass, aioclient_mock)
+    assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.post(f"{HOST_URL}/rest/login", status=401)
+    aioclient_mock.put(f"{HOST_URL}/rest/status/feed/1", status=401)
+    with pytest.raises(HomeAssistantError, match="password again"):
+        await _press(hass, "a")
+    await hass.async_block_till_done()
+
+    (flow,) = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert flow["context"]["source"] == "reauth"
+
+
 async def test_press_when_apex_unreachable(hass: HomeAssistant, aioclient_mock) -> None:
     aioclient_mock.post(f"{HOST_URL}/rest/login", json={"connect.sid": "sid-1"})
     aioclient_mock.put(f"{HOST_URL}/rest/status/feed/0", status=500)

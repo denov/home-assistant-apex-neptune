@@ -186,6 +186,11 @@ class ApexDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """The last few polls failed, so the readings can't be trusted to be current."""
         return self.failed_polls >= UNAVAILABLE_AFTER_FAILURES
 
+    def async_start_reauth(self) -> None:
+        """Have Home Assistant ask for the password again (once, however often it's rejected)."""
+        if self.config_entry is not None:
+            self.config_entry.async_start_reauth(self.hass)
+
     def request_extras(self) -> None:
         """Read modules and config again on the next refresh (e.g. after changing a program)."""
         self._extras_at = None
@@ -211,6 +216,8 @@ class ApexDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 AUTH_RETRY_SECONDS // 60,
             )
             self._extras_failing = True
+            # monitoring doesn't need the password, so ask for it rather than fail the update
+            self.async_start_reauth()
             return
         except Exception as err:  # noqa: BLE001 - never let this break monitoring
             if not self._extras_failing:

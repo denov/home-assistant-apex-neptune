@@ -17,14 +17,27 @@
       "confirm": {
         "title": "Apex found",
         "description": "Hostname: {hostname}\nSerial: {serial}\nSoftware: {software}\nHardware: {hardware}"
+      },
+      "reauth_confirm": {
+        "title": "Apex password",
+        "description": "The Apex at {host} rejected the password for {username}. Enter the current password, or remove it to only monitor the Apex.",
+        "data": {
+          "password": "Password",
+          "remove_password": "Remove the password (monitor only)"
+        },
+        "data_description": {
+          "remove_password": "Without the password there's no control of outputs or feed cycles, and no Trident levels or firmware updates."
+        }
       }
     },
     "error": {
       "cannot_connect": "Couldn't reach the Apex. Check the host or IP address.",
-      "invalid_auth": "The Apex rejected the username or password."
+      "invalid_auth": "The Apex rejected the username or password.",
+      "password_required": "Enter the password, or choose to remove it."
     },
     "abort": {
-      "already_configured": "This Apex is already set up."
+      "already_configured": "This Apex is already set up.",
+      "reauth_successful": "The Apex password was updated."
     }
   },
   "options": {

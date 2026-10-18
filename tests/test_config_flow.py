@@ -191,3 +191,74 @@ async def test_options_check_a_new_password(hass: HomeAssistant, aioclient_mock)
     )
     assert result["errors"] == {"base": "invalid_auth"}
     assert entry.data[CONF_PASSWORD] == "secret"
+
+
+# --- reauth -----------------------------------------------------------------
+
+
+async def _reauth(hass: HomeAssistant, aioclient_mock, *, login_status: int = 200):
+    """An entry whose password the Apex rejected (saved in the options, as older versions did)."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**USER_INPUT, CONF_PASSWORD: "old"},
+        options={CONF_PASSWORD: "old", CONF_LINE_VOLTAGE: 230},
+        unique_id=UID_BASE,
+    )
+    entry.add_to_hass(hass)
+    # for checking a new password, and the reload after
+    aioclient_mock.get(f"{BASE_URL}/status.json", text=load_fixture("status.json"))
+    if login_status == 200:
+        aioclient_mock.post(f"{HOST_URL}/rest/login", json={"connect.sid": "sid-1"})
+    else:
+        aioclient_mock.post(f"{HOST_URL}/rest/login", status=login_status)
+    aioclient_mock.get(f"{HOST_URL}/rest/status", text=load_fixture("rest_status.json"))
+    aioclient_mock.get(f"{HOST_URL}/rest/config", text=load_fixture("rest_config.json"))
+
+    result = await entry.start_reauth_flow(hass)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+    assert result["description_placeholders"]["host"] == APEX_IP
+    assert result["description_placeholders"]["username"] == "admin"
+    return entry, result
+
+
+async def test_reauth_new_password(hass: HomeAssistant, aioclient_mock) -> None:
+    entry, result = await _reauth(hass, aioclient_mock)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_PASSWORD: "new"})
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_PASSWORD] == "new"
+    # the old copy in the options would win over it
+    assert entry.options == {CONF_LINE_VOLTAGE: 230}
+    login = next(c for c in aioclient_mock.mock_calls if str(c[1]).endswith("/rest/login"))
+    assert login[2]["password"] == "new"
+
+
+async def test_reauth_rejected_password(hass: HomeAssistant, aioclient_mock) -> None:
+    entry, result = await _reauth(hass, aioclient_mock, login_status=401)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_PASSWORD: "wrong"})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_auth"}
+    assert entry.data[CONF_PASSWORD] == "old"
+
+
+async def test_reauth_needs_a_password_or_removal(hass: HomeAssistant, aioclient_mock) -> None:
+    _, result = await _reauth(hass, aioclient_mock)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    assert result["errors"] == {"base": "password_required"}
+
+
+async def test_reauth_remove_password(hass: HomeAssistant, aioclient_mock) -> None:
+    entry, result = await _reauth(hass, aioclient_mock)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"remove_password": True})
+    await hass.async_block_till_done()
+
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_PASSWORD] == ""
+    assert CONF_PASSWORD not in entry.options
+    # monitor only: the REST API isn't used any more
+    assert entry.runtime_data.rest is None
+    assert not [c for c in aioclient_mock.mock_calls if "/rest/" in str(c[1])]

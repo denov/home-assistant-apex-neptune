@@ -166,6 +166,11 @@ async def test_rejected_login_backs_off(hass: HomeAssistant, aioclient_mock) -> 
     await coordinator.async_refresh()
     assert len(_calls(aioclient_mock, "POST", "/rest/login")) == 1
 
+    # and Home Assistant asks for the password, once
+    (flow,) = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert flow["context"]["source"] == "reauth"
+    assert flow["context"]["entry_id"] == entry.entry_id
+
 
 async def test_extras_refresh_slowly(hass: HomeAssistant, aioclient_mock, monkeypatch) -> None:
     entry = await _setup(hass, aioclient_mock)

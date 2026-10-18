@@ -192,7 +192,10 @@ async def async_apex_command(coordinator: ApexDataUpdateCoordinator, action: str
     try:
         await command
     except ApexAuthError as err:
-        raise HomeAssistantError(f"{err}. Update the password in the Apex integration's options.") from err
+        coordinator.async_start_reauth()
+        raise HomeAssistantError(
+            f"{err}. Enter the Apex password again under Settings > Devices & services."
+        ) from err
     except ValueError as err:
         raise ServiceValidationError(f"Couldn't {action}: {err}") from err
     except (ApexRestError, aiohttp.ClientError, asyncio.TimeoutError) as err:
