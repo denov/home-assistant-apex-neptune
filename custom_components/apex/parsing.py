@@ -38,11 +38,33 @@ PROBE_TYPES: dict[str, ProbeType] = {
     "orp": ProbeType("ORP", "mdi:test-tube", UnitOfElectricPotential.MILLIVOLT),
     "pwr": ProbeType("Power", "mdi:flash", UnitOfPower.WATT, SensorDeviceClass.POWER),
     "volts": ProbeType("Voltage", "mdi:sine-wave", UnitOfElectricPotential.VOLT, SensorDeviceClass.VOLTAGE),
-    # liquid level sensor (LLS) set to inches
+    # liquid level sensor (LLS); the unit comes from module_unit()
     "in": ProbeType("Level", "mdi:waves-arrow-up", UnitOfLength.INCHES, SensorDeviceClass.DISTANCE),
-    # flow sensor; no device class, since older Home Assistant doesn't know gal/h
+    # flow sensor; no device class, since older Home Assistant doesn't know gal/h; the unit comes from module_unit()
     "gph": ProbeType("Flow", "mdi:waves-arrow-right", "gal/h"),
 }
+
+
+# the Apex reports "in" and "gph" whatever the FMM is set to; its levelMode / flowMode says the unit
+MODULE_UNITS: dict[str, tuple[str, dict[str, str]]] = {
+    "in": ("levelMode", {"in": UnitOfLength.INCHES, "cm": UnitOfLength.CENTIMETERS}),
+    "gph": ("flowMode", {"gph": "gal/h", "lph": "L/h"}),
+}
+
+# what an FMM is assumed to be set to when its config can't be read (no password)
+FMM_MODES: dict[str, dict[str, str]] = {
+    "us": {"levelMode": "in", "flowMode": "gph"},
+    "metric": {"levelMode": "cm", "flowMode": "lph"},
+}
+
+
+def module_unit(probe_type: str | None, module_extra: dict[str, Any] | None) -> str | None:
+    """The unit an FMM probe reads in, from its module's config; None if unknown."""
+    setting = MODULE_UNITS.get((probe_type or "").strip().lower())
+    if not setting or not isinstance(module_extra, dict):
+        return None
+    key, units = setting
+    return units.get(str(module_extra.get(key) or "").strip().lower())
 
 
 def probe_type(probe_type: str | None, probe_name: str | None) -> ProbeType | None:

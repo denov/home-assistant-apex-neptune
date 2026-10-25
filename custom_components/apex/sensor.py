@@ -27,7 +27,7 @@ from .entity import (
     find_output_config,
     output_key,
 )
-from .parsing import build_labels, probe_type, temp_unit
+from .parsing import FMM_MODES, build_labels, module_unit, probe_type, temp_unit
 from .rest import FEED_LETTERS
 
 # outputs whose program is usually just "Set <value>"
@@ -117,6 +117,16 @@ def _module_config(data: dict[str, Any] | None, abaddr: Any) -> dict[str, Any]:
     for m in config.get("mconf") or []:
         if isinstance(m, dict) and m.get("abaddr") == abaddr:
             return m
+    return {}
+
+
+def _input_module_config(data: dict[str, Any] | None, input_name: str) -> dict[str, Any]:
+    """The config of the module an input is on, by its device id (e.g. "1_P0" is on module 1)."""
+    config = (data or {}).get("config") or {}
+    for i in config.get("iconf") or []:
+        if isinstance(i, dict) and i.get("name") == input_name:
+            addr = str(i.get("did") or "").partition("_")[0]
+            return _module_config(data, int(addr)) if addr.isdigit() else {}
     return {}
 
 
@@ -210,6 +220,7 @@ class ApexProbeSensor(ApexEntity, SensorEntity):
         super().__init__(data, probe_name, label)
         self._probe = probe_name
         self._probe_type = (probe.get("type") or "").strip()
+        self._fmm_modes = FMM_MODES.get(data.settings.fmm_units)
 
         info = probe_type(self._probe_type, probe_name)
         self._attr_icon = info.icon if info else "mdi:gauge"
@@ -227,6 +238,17 @@ class ApexProbeSensor(ApexEntity, SensorEntity):
     @property
     def native_value(self):
         return self._p().get("value")
+
+    @property
+    def native_unit_of_measurement(self):
+        # e.g. an LLS on an FMM set to cm; until the REST config is read (never without a password),
+        # what the fmm_units option says
+        extra = _input_module_config(self.coordinator.data, self._p().get("name") or self._probe).get("extra")
+        return (
+            module_unit(self._probe_type, extra)
+            or module_unit(self._probe_type, self._fmm_modes)
+            or super().native_unit_of_measurement
+        )
 
     @property
     def extra_state_attributes(self):

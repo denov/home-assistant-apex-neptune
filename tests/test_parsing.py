@@ -205,3 +205,22 @@ def test_json_probes_with_the_same_name_and_no_device_id():
     )
     # numbered among the probes of that name, so other probes don't change the key
     assert data["probes"]["Leak_2"]["value"] == 2.0
+
+
+@pytest.mark.parametrize(
+    ("typ", "extra", "unit"),
+    [
+        ("in", {"levelMode": "cm"}, "cm"),
+        ("in", {"levelMode": "in"}, "in"),
+        ("gph", {"flowMode": "lph"}, "L/h"),
+        ("gph", {"flowMode": "gph"}, "gal/h"),
+        ("in", {"levelMode": "furlongs"}, None),
+        ("in", {}, None),
+        ("in", None, None),
+        ("temp", {"levelMode": "cm"}, None),
+    ],
+)
+def test_module_unit(typ, extra, unit):
+    from custom_components.apex.parsing import module_unit
+
+    assert module_unit(typ, extra) == unit

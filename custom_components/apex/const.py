@@ -14,6 +14,7 @@ CONF_PASSWORD = "password"
 
 # Options / advanced settings
 CONF_TEMP_UNIT = "temp_unit"                # "auto", "f", "c"
+CONF_FMM_UNITS = "fmm_units"                # "us", "metric": FMM level/flow units when the REST config can't be read
 CONF_SCAN_INTERVAL = "scan_interval"        # seconds (stored as string in options UI)
 CONF_TIMEOUT = "timeout"                    # seconds
 CONF_AMPS_DIAGNOSTIC = "amps_diagnostic"    # bool (mark Amp_* as diagnostic)
@@ -27,6 +28,7 @@ DEFAULT_USERNAME = "admin"
 DEFAULT_PASSWORD = ""
 
 DEFAULT_TEMP_UNIT = "auto"
+DEFAULT_FMM_UNITS = "us"
 DEFAULT_SCAN_INTERVAL = 30      # seconds
 DEFAULT_TIMEOUT = 10            # seconds
 DEFAULT_AMPS_DIAGNOSTIC = True  # keep Current/Amp_* under Diagnostic by default
@@ -43,6 +45,7 @@ class ApexSettings:
     username: str = DEFAULT_USERNAME
     password: str = DEFAULT_PASSWORD
     temp_unit: str = DEFAULT_TEMP_UNIT
+    fmm_units: str = DEFAULT_FMM_UNITS
     scan_interval: int = DEFAULT_SCAN_INTERVAL
     timeout: int = DEFAULT_TIMEOUT
     amps_diagnostic: bool = DEFAULT_AMPS_DIAGNOSTIC
@@ -58,6 +61,7 @@ class ApexSettings:
             password=d.get(CONF_PASSWORD) or DEFAULT_PASSWORD,
             # older versions saved "", "F" or "C"
             temp_unit=(d.get(CONF_TEMP_UNIT) or DEFAULT_TEMP_UNIT).lower(),
+            fmm_units=d.get(CONF_FMM_UNITS) or DEFAULT_FMM_UNITS,
             scan_interval=int(d.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)),
             timeout=int(d.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)),
             amps_diagnostic=bool(d.get(CONF_AMPS_DIAGNOSTIC, DEFAULT_AMPS_DIAGNOSTIC)),

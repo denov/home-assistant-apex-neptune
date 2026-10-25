@@ -49,6 +49,7 @@
           "username": "Username",
           "password": "Password",
           "temp_unit": "Temperature unit",
+          "fmm_units": "Level and flow units",
           "scan_interval": "Update interval",
           "timeout": "Timeout",
           "amps_diagnostic": "Show current (Amps) probes as diagnostics",
@@ -58,6 +59,7 @@
         },
         "data_description": {
           "password": "Leave blank to keep the current password. Needed to control outputs and feed cycles, and for Trident levels and firmware updates.",
+          "fmm_units": "What your FMM's level and flow sensors are set to on the Apex. Only used without a password: with one, the integration reads the setting from the Apex.",
           "line_voltage": "Used for Total Power (total current × voltage). 120 in North America, 230 in most other places.",
           "enable_per_outlet_power": "Adds an energy (kWh) sensor for each outlet on an energy bar that reports watts (EB832).",
           "read_only": "Monitor only: no control entities or actions, even with a password."
@@ -122,6 +124,12 @@
         "auto": "Auto",
         "f": "°F",
         "c": "°C"
+      }
+    },
+    "fmm_units": {
+      "options": {
+        "us": "Inches, gal/h",
+        "metric": "cm, L/h"
       }
     },
     "scan_interval": {

@@ -20,6 +20,7 @@ from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClien
 from custom_components.apex import coordinator as coordinator_module
 from custom_components.apex.const import (
     CONF_ENABLE_PER_OUTLET_POWER,
+    CONF_FMM_UNITS,
     CONF_IP_ADDRESS,
     CONF_PASSWORD,
     CONF_READ_ONLY,
@@ -139,6 +140,79 @@ async def test_trident_np_reagents_are_numbered(hass: HomeAssistant, aioclient_m
     one = _state(hass, "sensor", f"{UID_BASE}_trident_5_reagent_1")
     # 3.652 mL per test on a Trident NP
     assert one.attributes["tests_remaining"] == 30
+
+
+def _with_fmm_probes(istat) -> None:
+    istat["inputs"] += [
+        {"did": "3_P0", "type": "in", "name": "SMPLVL", "value": 17.3},
+        {"did": "3_P1", "type": "gph", "name": "Flow", "value": 120},
+    ]
+
+
+def _mock_fmm_config(aioclient_mock, level_mode: str, flow_mode: str) -> None:
+    config = json.loads(load_fixture("rest_config.json"))
+    config["iconf"] += [
+        {"did": "3_P0", "enable": True, "type": "in", "name": "SMPLVL", "alarm": {}, "extra": {}},
+        {"did": "3_P1", "enable": True, "type": "gph", "name": "Flow", "alarm": {}, "extra": {}},
+    ]
+    fmm = next(m for m in config["mconf"] if m["hwtype"] == "FMM")
+    fmm["extra"].update(levelMode=level_mode, flowMode=flow_mode)
+    aioclient_mock.get(f"{HOST_URL}/rest/config", text=json.dumps(config))
+
+
+async def test_fmm_metric_units(hass: HomeAssistant, aioclient_mock) -> None:
+    """The Apex reports "in" and "gph" even when the FMM is set to cm and L/h (issue #2)."""
+    _mock_fmm_config(aioclient_mock, "cm", "lph")
+    await _setup(hass, aioclient_mock, status=_status_json(_with_fmm_probes), metric=True)
+
+    level = _state(hass, "sensor", f"{UID_BASE}_smplvl")
+    assert float(level.state) == 17.3
+    assert level.attributes["unit_of_measurement"] == "cm"
+    flow = _state(hass, "sensor", f"{UID_BASE}_flow")
+    assert float(flow.state) == 120
+    assert flow.attributes["unit_of_measurement"] == "L/h"
+
+
+async def test_fmm_us_units(hass: HomeAssistant, aioclient_mock) -> None:
+    _mock_fmm_config(aioclient_mock, "in", "gph")
+    await _setup(hass, aioclient_mock, status=_status_json(_with_fmm_probes))
+
+    level = _state(hass, "sensor", f"{UID_BASE}_smplvl")
+    assert float(level.state) == 17.3
+    assert level.attributes["unit_of_measurement"] == "in"
+    assert _state(hass, "sensor", f"{UID_BASE}_flow").attributes["unit_of_measurement"] == "gal/h"
+
+
+async def test_fmm_units_without_rest_config(hass: HomeAssistant, aioclient_mock) -> None:
+    await _setup(hass, aioclient_mock, password="", rest=False, status=_status_json(_with_fmm_probes))
+
+    assert _state(hass, "sensor", f"{UID_BASE}_smplvl").attributes["unit_of_measurement"] == "in"
+    assert _state(hass, "sensor", f"{UID_BASE}_flow").attributes["unit_of_measurement"] == "gal/h"
+
+
+async def test_fmm_units_option_without_rest_config(hass: HomeAssistant, aioclient_mock) -> None:
+    await _setup(
+        hass,
+        aioclient_mock,
+        password="",
+        rest=False,
+        status=_status_json(_with_fmm_probes),
+        options={CONF_FMM_UNITS: "metric"},
+        metric=True,
+    )
+
+    level = _state(hass, "sensor", f"{UID_BASE}_smplvl")
+    assert float(level.state) == 17.3
+    assert level.attributes["unit_of_measurement"] == "cm"
+    assert _state(hass, "sensor", f"{UID_BASE}_flow").attributes["unit_of_measurement"] == "L/h"
+
+
+async def test_fmm_config_wins_over_units_option(hass: HomeAssistant, aioclient_mock) -> None:
+    _mock_fmm_config(aioclient_mock, "in", "gph")
+    await _setup(hass, aioclient_mock, status=_status_json(_with_fmm_probes), options={CONF_FMM_UNITS: "metric"})
+
+    assert _state(hass, "sensor", f"{UID_BASE}_smplvl").attributes["unit_of_measurement"] == "in"
+    assert _state(hass, "sensor", f"{UID_BASE}_flow").attributes["unit_of_measurement"] == "gal/h"
 
 
 async def test_no_trident_without_password(hass: HomeAssistant, aioclient_mock) -> None:

@@ -18,6 +18,7 @@ from .const import (
     CONF_PASSWORD,
     DEFAULT_USERNAME,
     CONF_TEMP_UNIT,
+    CONF_FMM_UNITS,
     CONF_SCAN_INTERVAL,
     CONF_TIMEOUT,
     CONF_AMPS_DIAGNOSTIC,
@@ -40,6 +41,12 @@ PASSWORD_SELECTOR = selector.TextSelector(selector.TextSelectorConfig(type=selec
 TEMP_UNIT_SELECTOR = selector.SelectSelector(
     selector.SelectSelectorConfig(
         options=["auto", "f", "c"], mode=selector.SelectSelectorMode.DROPDOWN, translation_key="temp_unit"
+    )
+)
+
+FMM_UNITS_SELECTOR = selector.SelectSelector(
+    selector.SelectSelectorConfig(
+        options=["us", "metric"], mode=selector.SelectSelectorMode.DROPDOWN, translation_key="fmm_units"
     )
 )
 
@@ -91,6 +98,7 @@ def _schema_options(s: ApexSettings) -> vol.Schema:
             vol.Optional(CONF_USERNAME, default=s.username): str,
             vol.Optional(CONF_PASSWORD): PASSWORD_SELECTOR,
             vol.Optional(CONF_TEMP_UNIT, default=s.temp_unit): TEMP_UNIT_SELECTOR,
+            vol.Optional(CONF_FMM_UNITS, default=s.fmm_units): FMM_UNITS_SELECTOR,
             vol.Optional(CONF_SCAN_INTERVAL, default=str(s.scan_interval)): SCAN_INTERVAL_SELECTOR,
             vol.Optional(CONF_TIMEOUT, default=s.timeout): TIMEOUT_SELECTOR,
             vol.Optional(CONF_AMPS_DIAGNOSTIC, default=s.amps_diagnostic): selector.BooleanSelector(),
