@@ -224,3 +224,17 @@ def test_module_unit(typ, extra, unit):
     from custom_components.apex.parsing import module_unit
 
     assert module_unit(typ, extra) == unit
+
+
+def test_every_conductivity_probe_is_salinity():
+    """A conductivity probe is a salinity probe, whatever it's named (issue #3)."""
+    from custom_components.apex.parsing import build_labels, probe_type
+
+    assert probe_type("Cond") == ("Salinity", "mdi:shaker-outline", "ppt", None)
+    assert build_labels({"Cond": {"name": "Cond", "type": "Cond"}}) == {"Cond": "Salinity"}
+    # two of them: named after the Apex, like two temperature probes
+    probes = {
+        "Salt": {"name": "Salt", "type": "Cond"},
+        "WS_SAL": {"name": "WS_SAL", "type": "Cond"},
+    }
+    assert build_labels(probes) == {"Salt": "Salt", "WS_SAL": "WS_SAL"}

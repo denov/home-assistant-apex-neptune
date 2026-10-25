@@ -29,9 +29,8 @@ PROBE_TYPES: dict[str, ProbeType] = {
     "temp": ProbeType("Temp", "mdi:thermometer", None, SensorDeviceClass.TEMPERATURE),
     "ph": ProbeType("pH", "mdi:ph"),
     "amps": ProbeType("Current", "mdi:current-ac", UnitOfElectricCurrent.AMPERE, SensorDeviceClass.CURRENT),
-    "cond": ProbeType("Conductivity", "mdi:flash"),
-    # a cond probe named Salt...
-    "salt": ProbeType("Salinity", "mdi:shaker-outline", "ppt"),
+    # the Apex's conductivity probe is for salinity, whatever it's named (Salt, WS_SAL)
+    "cond": ProbeType("Salinity", "mdi:shaker-outline", "ppt"),
     "alk": ProbeType("Alkalinity", "mdi:test-tube", "dKH"),
     "ca": ProbeType("Calcium", "mdi:flask", "ppm"),
     "mg": ProbeType("Magnesium", "mdi:flask-outline", "ppm"),
@@ -67,11 +66,8 @@ def module_unit(probe_type: str | None, module_extra: dict[str, Any] | None) -> 
     return units.get(str(module_extra.get(key) or "").strip().lower())
 
 
-def probe_type(probe_type: str | None, probe_name: str | None) -> ProbeType | None:
-    t = (probe_type or "").strip().lower()
-    if t == "cond" and (probe_name or "").strip().lower().startswith("salt"):
-        t = "salt"
-    return PROBE_TYPES.get(t)
+def probe_type(probe_type: str | None) -> ProbeType | None:
+    return PROBE_TYPES.get((probe_type or "").strip().lower())
 
 
 def temp_unit(value: float | None, configured: str) -> str:
@@ -98,7 +94,7 @@ def split_probe_name(name: str) -> tuple[str, str | None, str | None]:
 
 
 def pretty_type(probe_name: str, probe_type_name: str) -> str:
-    info = probe_type(probe_type_name, probe_name)
+    info = probe_type(probe_type_name)
     if info:
         return info.label
     return probe_type_name.strip() if probe_type_name else probe_name

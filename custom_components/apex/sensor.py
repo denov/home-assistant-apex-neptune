@@ -222,7 +222,7 @@ class ApexProbeSensor(ApexEntity, SensorEntity):
         self._probe_type = (probe.get("type") or "").strip()
         self._fmm_modes = FMM_MODES.get(data.settings.fmm_units)
 
-        info = probe_type(self._probe_type, probe_name)
+        info = probe_type(self._probe_type)
         self._attr_icon = info.icon if info else "mdi:gauge"
         if info:
             self._attr_device_class = info.device_class
