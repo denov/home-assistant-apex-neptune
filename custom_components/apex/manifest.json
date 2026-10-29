@@ -8,5 +8,5 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/denov/home-assistant-apex-neptune/issues",
   "requirements": [],
-  "version": "1.8.0"
+  "version": "1.8.1"
 }
