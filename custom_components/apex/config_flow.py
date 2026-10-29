@@ -113,7 +113,8 @@ async def _async_validate(hass: HomeAssistant, s: ApexSettings) -> tuple[dict[st
     """(the Apex's meta, error key or None) for these connection settings.
 
     With a password, it's checked against the REST login. Only a rejected login fails:
-    other errors (e.g. firmware without the REST API) shouldn't block monitoring.
+    other errors (e.g. firmware without the REST API) shouldn't block monitoring. An Apex
+    that only serves status.xml (e.g. an Apex Classic) has no REST login to check.
     """
     session = async_get_clientsession(hass)
     auth = aiohttp.BasicAuth(s.username, s.password) if s.password else None
@@ -123,7 +124,7 @@ async def _async_validate(hass: HomeAssistant, s: ApexSettings) -> tuple[dict[st
         return {}, "cannot_connect"
     meta = parsed.get("meta") or {}
 
-    if s.password:
+    if s.password and parsed.get("source") == "json":
         try:
             await ApexRestClient(session, s.host_url, s.username, s.password, s.timeout).async_login()
         except ApexAuthError:

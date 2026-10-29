@@ -37,6 +37,15 @@ class ApexAuthError(ApexRestError):
     """Login failed: wrong username or password."""
 
 
+class ApexNoRestError(ApexRestError):
+    """The Apex has no REST API (e.g. an Apex Classic), so it can't be controlled from here."""
+
+
+def _is_basic_challenge(resp: aiohttp.ClientResponse) -> bool:
+    """An Apex Classic has no /rest API and asks for HTTP Basic auth on its pages instead."""
+    return resp.headers.get("WWW-Authenticate", "").lower().startswith("basic")
+
+
 def dos_profile_mode(rate: float) -> int:
     """Profile mode for a dose rate (mL/min): the slowest pump speed with the safety margin, forward."""
     target = rate * DOS_SAFETY_MARGIN
@@ -70,6 +79,8 @@ class ApexRestClient:
                 json={"login": self._username, "password": self._password, "remember_me": False},
             ) as resp:
                 if resp.status in (401, 403):
+                    if _is_basic_challenge(resp):
+                        raise ApexNoRestError("This Apex has no REST API (Apex Classic), so it can only be monitored")
                     raise ApexAuthError("Apex login failed: check the username and password")
                 resp.raise_for_status()
                 body = await resp.json(content_type=None)

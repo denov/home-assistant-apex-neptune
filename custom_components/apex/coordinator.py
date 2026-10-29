@@ -17,7 +17,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DEFAULT_TIMEOUT, ApexSettings
-from .rest import ApexAuthError, ApexRestClient
+from .rest import ApexAuthError, ApexNoRestError, ApexRestClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -207,6 +207,11 @@ class ApexDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             status = await self.rest.async_get_status()
             config = await self.rest.async_get_config()
+        except ApexNoRestError as err:
+            # e.g. an Apex Classic: asking again won't help, and the password isn't wrong
+            self._extras_at = float("inf")
+            _LOGGER.info("%s; Trident levels, firmware updates and output programs are unavailable", err)
+            return
         except ApexAuthError as err:
             self._extras_at = now + AUTH_RETRY_SECONDS
             _LOGGER.warning(

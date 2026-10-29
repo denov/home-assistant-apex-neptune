@@ -117,6 +117,26 @@ async def test_firmware_without_rest_login_can_still_be_added(hass: HomeAssistan
     assert result["step_id"] == "confirm"
 
 
+async def test_apex_classic_can_be_added_with_its_password(hass: HomeAssistant, aioclient_mock) -> None:
+    """An Apex Classic only serves status.xml and has no REST login to check the password against."""
+    aioclient_mock.get(f"{BASE_URL}/status.json", status=404)
+    aioclient_mock.get(f"{BASE_URL}/status.xml", text=load_fixture("status.xml"))
+    aioclient_mock.post(f"http://{APEX_IP}/rest/login", status=401, headers={"WWW-Authenticate": 'Basic realm="Apex"'})
+
+    result = await _start(hass)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {**USER_INPUT, CONF_PASSWORD: "secret"})
+    assert result["step_id"] == "confirm"
+
+
+async def test_basic_auth_challenge_is_not_a_wrong_password(hass: HomeAssistant, aioclient_mock) -> None:
+    aioclient_mock.get(f"{BASE_URL}/status.json", text=load_fixture("status.json"))
+    aioclient_mock.post(f"http://{APEX_IP}/rest/login", status=401, headers={"WWW-Authenticate": 'Basic realm="Apex"'})
+
+    result = await _start(hass)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {**USER_INPUT, CONF_PASSWORD: "secret"})
+    assert result["step_id"] == "confirm"
+
+
 def test_normalize_host():
     from custom_components.apex.config_flow import normalize_host
 

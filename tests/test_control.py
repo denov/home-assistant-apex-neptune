@@ -246,6 +246,30 @@ async def test_rejected_login_backs_off(hass: HomeAssistant, aioclient_mock) -> 
     assert flow["context"]["entry_id"] == entry.entry_id
 
 
+async def test_apex_classic_is_monitored_without_asking_for_the_password(
+    hass: HomeAssistant, aioclient_mock, monkeypatch
+) -> None:
+    """An Apex Classic has no REST API: it answers /rest/login with an HTTP Basic challenge."""
+    aioclient_mock.get(f"{BASE_URL}/status.json", text=_status_json())
+    aioclient_mock.post(f"{HOST_URL}/rest/login", status=401, headers={"WWW-Authenticate": 'Basic realm="Apex"'})
+    data = {CONF_IP_ADDRESS: APEX_IP, CONF_USERNAME: "admin", CONF_PASSWORD: "secret"}
+    entry = MockConfigEntry(domain=DOMAIN, data=data, unique_id=APEX_IP)
+    hass.config.units = US_CUSTOMARY_SYSTEM
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert float(_state(hass, "sensor", f"{UID_BASE}_tmp").state) == 78.6
+    assert hass.config_entries.flow.async_progress_by_handler(DOMAIN) == []
+
+    # and it doesn't keep trying
+    coordinator = entry.runtime_data.coordinator
+    clock = coordinator_module.time.monotonic() + coordinator_module.AUTH_RETRY_SECONDS + 1
+    monkeypatch.setattr(coordinator_module.time, "monotonic", lambda: clock)
+    await coordinator.async_refresh()
+    assert len(_calls(aioclient_mock, "POST", "/rest/login")) == 1
+
+
 async def test_extras_refresh_slowly(hass: HomeAssistant, aioclient_mock, monkeypatch) -> None:
     entry = await _setup(hass, aioclient_mock)
     coordinator = entry.runtime_data.coordinator

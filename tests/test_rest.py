@@ -6,7 +6,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMockResponse
 
-from custom_components.apex.rest import ApexAuthError, ApexRestClient, ApexRestError
+from custom_components.apex.rest import ApexAuthError, ApexNoRestError, ApexRestClient, ApexRestError
 
 from .conftest import HOST_URL
 
@@ -91,6 +91,14 @@ async def test_wrong_password(hass: HomeAssistant, aioclient_mock) -> None:
     with pytest.raises(ApexAuthError):
         await _client(hass).async_start_feed(1)
     assert _calls(aioclient_mock, "PUT", "/rest/status/feed/1") == []
+
+
+async def test_apex_classic_has_no_rest_api(hass: HomeAssistant, aioclient_mock) -> None:
+    # it protects its pages with HTTP Basic auth, so a 401 there isn't a wrong password
+    aioclient_mock.post(LOGIN_URL, status=401, headers={"WWW-Authenticate": 'Basic realm="Apex"'})
+
+    with pytest.raises(ApexNoRestError):
+        await _client(hass).async_start_feed(1)
 
 
 async def test_rejected_after_fresh_login(hass: HomeAssistant, aioclient_mock) -> None:
