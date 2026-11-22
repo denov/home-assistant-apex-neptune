@@ -9,6 +9,6 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/denov/home-assistant-apex-neptune/issues",
   "requirements": [],
-  "version": "1.8.1",
+  "version": "1.9.0",
   "zeroconf": [{ "type": "_http._tcp.local.", "name": "apex*" }]
 }
