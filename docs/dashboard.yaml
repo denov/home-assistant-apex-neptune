@@ -1,0 +1,603 @@
+# Example Apex dashboard: the one in the README screenshot (docs/dashboard.png).
+# The integration doesn't create a dashboard; this is a starting point to make your own.
+#
+# To use it: Settings > Dashboards > Add dashboard > New dashboard from scratch, open it,
+# then Edit dashboard > ⋮ > Raw configuration editor, and paste this file.
+#
+# Entity IDs are what a new install gets for one particular Apex. Yours depend on your probes,
+# modules and output names: change the cards that show as unavailable to your entities
+# (Settings > Devices & services > Apex Neptune Monitor lists them), or delete them.
+# The Outlets view has a few outputs; add a tile for each of yours. Only built-in cards are used.
+
+title: Apex
+views:
+- title: Tank
+  path: apex
+  icon: mdi:fishbowl
+  type: sections
+  max_columns: 4
+  dense_section_placement: true
+  badges:
+  - type: entity
+    entity: binary_sensor.apex_alarm
+    name: Alarm
+    show_name: true
+    show_state: true
+    show_icon: true
+  - type: entity
+    entity: sensor.apex_temp
+    name: Temp
+    show_name: true
+  - type: entity
+    entity: sensor.apex_ph
+    name: pH
+    show_name: true
+  - type: entity
+    entity: sensor.apex_salinity
+    name: Salinity
+    show_name: true
+  - type: entity
+    entity: sensor.apex_alkalinity
+    name: Alk
+    show_name: true
+  - type: entity
+    entity: sensor.apex_feed_mode
+    name: Feed
+    show_name: true
+  - type: entity
+    entity: sensor.apex_total_power
+    name: Power
+    show_name: true
+  sections:
+  - type: grid
+    cards:
+    - type: heading
+      heading: Water
+      icon: mdi:waves
+    - type: tile
+      entity: sensor.apex_temp
+      name: Temp
+    - type: tile
+      entity: sensor.apex_temp_2
+      name: Temp 2
+    - type: tile
+      entity: sensor.apex_ph
+      name: pH
+    - type: tile
+      entity: sensor.apex_ph_2
+      name: pH 2
+    - type: tile
+      entity: sensor.apex_salinity
+      name: Salinity
+    - type: tile
+      entity: sensor.apex_salinity_2
+      name: Salinity 2
+    - type: heading
+      heading: Trident results
+      heading_style: subtitle
+    - type: tile
+      entity: sensor.apex_alkalinity
+      name: Alkalinity
+      grid_options:
+        columns: 4
+      vertical: true
+    - type: tile
+      entity: sensor.apex_calcium
+      name: Calcium
+      grid_options:
+        columns: 4
+      vertical: true
+    - type: tile
+      entity: sensor.apex_magnesium
+      name: Magnesium
+      grid_options:
+        columns: 4
+      vertical: true
+  - type: grid
+    cards:
+    - type: heading
+      heading: Feed
+      icon: mdi:fish
+    - type: tile
+      entity: sensor.apex_feed_mode
+      name: Feed mode
+    - type: tile
+      entity: sensor.apex_feed_ends
+      name: Ends
+    - type: tile
+      entity: button.apex_feed_a
+      name: A
+      icon: mdi:alpha-a-circle
+      hide_state: true
+      tap_action:
+        action: perform-action
+        perform_action: button.press
+        target:
+          entity_id: button.apex_feed_a
+      icon_tap_action:
+        action: perform-action
+        perform_action: button.press
+        target:
+          entity_id: button.apex_feed_a
+      hold_action:
+        action: more-info
+      grid_options:
+        columns: 3
+    - type: tile
+      entity: button.apex_feed_b
+      name: B
+      icon: mdi:alpha-b-circle
+      hide_state: true
+      tap_action:
+        action: perform-action
+        perform_action: button.press
+        target:
+          entity_id: button.apex_feed_b
+      icon_tap_action:
+        action: perform-action
+        perform_action: button.press
+        target:
+          entity_id: button.apex_feed_b
+      hold_action:
+        action: more-info
+      grid_options:
+        columns: 3
+    - type: tile
+      entity: button.apex_feed_c
+      name: C
+      icon: mdi:alpha-c-circle
+      hide_state: true
+      tap_action:
+        action: perform-action
+        perform_action: button.press
+        target:
+          entity_id: button.apex_feed_c
+      icon_tap_action:
+        action: perform-action
+        perform_action: button.press
+        target:
+          entity_id: button.apex_feed_c
+      hold_action:
+        action: more-info
+      grid_options:
+        columns: 3
+    - type: tile
+      entity: button.apex_feed_d
+      name: D
+      icon: mdi:alpha-d-circle
+      hide_state: true
+      tap_action:
+        action: perform-action
+        perform_action: button.press
+        target:
+          entity_id: button.apex_feed_d
+        confirmation:
+          text: Start Feed D? This also runs the auto feeder.
+      icon_tap_action:
+        action: perform-action
+        perform_action: button.press
+        target:
+          entity_id: button.apex_feed_d
+        confirmation:
+          text: Start Feed D? This also runs the auto feeder.
+      hold_action:
+        action: more-info
+      grid_options:
+        columns: 3
+    - type: tile
+      entity: button.apex_cancel_feed
+      name: Cancel feed
+      icon: mdi:fish-off
+      hide_state: true
+      tap_action:
+        action: perform-action
+        perform_action: button.press
+        target:
+          entity_id: button.apex_cancel_feed
+      hold_action:
+        action: more-info
+      grid_options:
+        columns: 12
+  - type: grid
+    cards:
+    - type: heading
+      heading: Reagents & dosing
+      icon: mdi:flask
+    - type: tile
+      entity: sensor.apex_tri_reagent_a
+      name: Reagent A
+      state_content:
+      - state
+      - tests_remaining
+    - type: tile
+      entity: sensor.apex_tri_reagent_b
+      name: Reagent B
+      state_content:
+      - state
+      - tests_remaining
+    - type: tile
+      entity: sensor.apex_tri_reagent_c
+      name: Reagent C
+      state_content:
+      - state
+      - tests_remaining
+    - type: tile
+      entity: sensor.apex_tri_waste
+      name: Trident waste
+      state_content:
+      - state
+      - percent_full
+    - type: tile
+      entity: sensor.apex_dos_del_volume_left
+      name: DOS_DEL
+    - type: tile
+      entity: sensor.apex_dos_add_volume_left
+      name: DOS_ADD
+  - type: grid
+    cards:
+    - type: heading
+      heading: System
+      icon: mdi:shield-check
+    - type: tile
+      entity: binary_sensor.apex_alarm
+      name: Alarm
+      state_content:
+      - state
+      - active_alerts
+    - type: tile
+      entity: update.apex_firmware
+      name: Firmware
+      state_content:
+      - state
+      - installed_version
+    - type: tile
+      entity: sensor.apex_total_power
+      name: Power
+    - type: tile
+      entity: sensor.apex_total_current
+      name: Current
+    - type: tile
+      entity: sensor.apex_total_energy
+      name: Energy
+      grid_options:
+        columns: 12
+    - type: tile
+      entity: sensor.apex_power_failed
+      name: Last power failure
+    - type: tile
+      entity: sensor.apex_power_restored
+      name: Power restored
+    - type: heading
+      heading: Inputs
+      heading_style: subtitle
+    - type: tile
+      entity: binary_sensor.apex_swx3_1
+      name: Swx3_1
+    - type: tile
+      entity: binary_sensor.apex_swx3_2
+      name: Swx3_2
+  - type: grid
+    column_span: 2
+    cards:
+    - type: heading
+      heading: Trends
+      icon: mdi:chart-line
+    - type: history-graph
+      title: Temperature
+      hours_to_show: 24
+      entities:
+      - entity: sensor.apex_temp
+        name: Temp
+      - entity: sensor.apex_temp_2
+        name: Temp 2
+      grid_options:
+        columns: 12
+        rows: 5
+    - type: history-graph
+      title: pH
+      hours_to_show: 24
+      entities:
+      - entity: sensor.apex_ph
+        name: pH
+      - entity: sensor.apex_ph_2
+        name: pH 2
+      grid_options:
+        columns: 12
+        rows: 5
+    - type: history-graph
+      title: Salinity
+      hours_to_show: 24
+      entities:
+      - entity: sensor.apex_salinity
+        name: Salinity
+      - entity: sensor.apex_salinity_2
+        name: Salinity 2
+      grid_options:
+        columns: 12
+        rows: 5
+    - type: history-graph
+      title: Alkalinity, 7 days
+      hours_to_show: 168
+      entities:
+      - entity: sensor.apex_alkalinity
+        name: Alk
+      grid_options:
+        columns: 12
+        rows: 5
+  - type: grid
+    column_span: 2
+    cards:
+    - type: heading
+      heading: Outlets
+      icon: mdi:power-socket-us
+    - type: heading
+      heading: Flow
+      heading_style: subtitle
+    - type: tile
+      entity: select.apex_pump_return_mode
+      name: Return pump
+      state_content:
+      - state
+      - raw_state
+      tap_action:
+        action: more-info
+      features:
+      - type: select-options
+      features_position: inline
+      grid_options:
+        columns: 6
+    - type: tile
+      entity: select.apex_pump_gfo_mode
+      name: GFO pump
+      state_content:
+      - state
+      - raw_state
+      tap_action:
+        action: more-info
+      features:
+      - type: select-options
+      features_position: inline
+      grid_options:
+        columns: 6
+    - type: tile
+      entity: select.apex_vortex_l_mode
+      name: Vortex L
+      state_content:
+      - state
+      - raw_state
+      tap_action:
+        action: more-info
+      features:
+      - type: select-options
+      features_position: inline
+      grid_options:
+        columns: 6
+    - type: tile
+      entity: select.apex_vortex_r_mode
+      name: Vortex R
+      state_content:
+      - state
+      - raw_state
+      tap_action:
+        action: more-info
+      features:
+      - type: select-options
+      features_position: inline
+      grid_options:
+        columns: 6
+    - type: heading
+      heading: Lights
+      heading_style: subtitle
+    - type: tile
+      entity: select.apex_light_l_mode
+      name: Light L
+      state_content:
+      - state
+      - raw_state
+      tap_action:
+        action: more-info
+      features:
+      - type: select-options
+      features_position: inline
+      grid_options:
+        columns: 6
+    - type: tile
+      entity: select.apex_light_c_mode
+      name: Light C
+      state_content:
+      - state
+      - raw_state
+      tap_action:
+        action: more-info
+      features:
+      - type: select-options
+      features_position: inline
+      grid_options:
+        columns: 6
+    - type: tile
+      entity: select.apex_light_r_mode
+      name: Light R
+      state_content:
+      - state
+      - raw_state
+      tap_action:
+        action: more-info
+      features:
+      - type: select-options
+      features_position: inline
+      grid_options:
+        columns: 6
+    - type: tile
+      entity: select.apex_light_stand_mode
+      name: Stand light
+      state_content:
+      - state
+      - raw_state
+      tap_action:
+        action: more-info
+      features:
+      - type: select-options
+      features_position: inline
+      grid_options:
+        columns: 6
+    - type: heading
+      heading: Heat
+      heading_style: subtitle
+    - type: tile
+      entity: select.apex_heaters_mode
+      name: Heaters
+      state_content:
+      - state
+      - raw_state
+      tap_action:
+        action: more-info
+      features:
+      - type: select-options
+      features_position: inline
+      grid_options:
+        columns: 6
+    - type: tile
+      entity: select.apex_heater_2_mode
+      name: Heater 2
+      state_content:
+      - state
+      - raw_state
+      tap_action:
+        action: more-info
+      features:
+      - type: select-options
+      features_position: inline
+      grid_options:
+        columns: 6
+    - type: heading
+      heading: Chemistry & feeding
+      heading_style: subtitle
+    - type: tile
+      entity: select.apex_trident_mode
+      name: Trident
+      state_content:
+      - state
+      - raw_state
+      tap_action:
+        action: more-info
+      features:
+      - type: select-options
+      features_position: inline
+      grid_options:
+        columns: 6
+    - type: tile
+      entity: select.apex_dos_mode
+      name: DOS
+      state_content:
+      - state
+      - raw_state
+      tap_action:
+        action: more-info
+      features:
+      - type: select-options
+      features_position: inline
+      grid_options:
+        columns: 6
+    - type: tile
+      entity: select.apex_co2_reactor_mode
+      name: CO2 reactor
+      state_content:
+      - state
+      - raw_state
+      tap_action:
+        action: more-info
+      features:
+      - type: select-options
+      features_position: inline
+      grid_options:
+        columns: 6
+    - type: tile
+      entity: select.apex_co2_feeder_mode
+      name: CO2 feeder
+      state_content:
+      - state
+      - raw_state
+      tap_action:
+        action: more-info
+      features:
+      - type: select-options
+      features_position: inline
+      grid_options:
+        columns: 6
+    - type: tile
+      entity: select.apex_feeder_mode
+      name: Feeder
+      state_content:
+      - state
+      - raw_state
+      tap_action:
+        action: more-info
+      features:
+      - type: select-options
+      features_position: inline
+      grid_options:
+        columns: 6
+- title: Outlets
+  path: outlets
+  icon: mdi:power-socket-us
+  type: sections
+  max_columns: 4
+  sections:
+  - type: grid
+    column_span: 4
+    cards:
+    - type: heading
+      heading: All outputs
+      icon: mdi:power-socket-us
+    - type: tile
+      entity: select.apex_feeder_mode
+      name: Feeder
+      state_content:
+      - state
+      - raw_state
+      tap_action:
+        action: more-info
+      features:
+      - type: select-options
+      features_position: inline
+      grid_options:
+        columns: 6
+    - type: tile
+      entity: select.apex_heaters_mode
+      name: Heaters
+      state_content:
+      - state
+      - raw_state
+      tap_action:
+        action: more-info
+      features:
+      - type: select-options
+      features_position: inline
+      grid_options:
+        columns: 6
+    - type: tile
+      entity: select.apex_light_l_mode
+      name: Light_L
+      state_content:
+      - state
+      - raw_state
+      tap_action:
+        action: more-info
+      features:
+      - type: select-options
+      features_position: inline
+      grid_options:
+        columns: 6
+    - type: tile
+      entity: select.apex_pump_return_mode
+      name: PUMP_RETURN
+      state_content:
+      - state
+      - raw_state
+      tap_action:
+        action: more-info
+      features:
+      - type: select-options
+      features_position: inline
+      grid_options:
+        columns: 6
