@@ -9,7 +9,9 @@ from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.apex.const import (
+    CONF_FAN_OUTPUTS,
     CONF_IP_ADDRESS,
+    CONF_LIGHT_OUTPUTS,
     CONF_LINE_VOLTAGE,
     CONF_PASSWORD,
     CONF_READ_ONLY,
@@ -282,3 +284,185 @@ async def test_reauth_remove_password(hass: HomeAssistant, aioclient_mock) -> No
     # monitor only: the REST API isn't used any more
     assert entry.runtime_data.rest is None
     assert not [c for c in aioclient_mock.mock_calls if "/rest/" in str(c[1])]
+
+
+# --- discovery --------------------------------------------------------------
+
+
+def _dhcp(ip: str = APEX_IP):
+    from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
+
+    return DhcpServiceInfo(ip=ip, hostname="apex", macaddress="aabbccddeeff")
+
+
+def _zeroconf(ip: str = APEX_IP):
+    from ipaddress import ip_address
+
+    from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
+
+    return ZeroconfServiceInfo(
+        ip_address=ip_address(ip),
+        ip_addresses=[ip_address(ip)],
+        port=80,
+        hostname="apex.local.",
+        type="_http._tcp.local.",
+        name="apex._http._tcp.local.",
+        properties={},
+    )
+
+
+async def _discover(hass: HomeAssistant, source: str = config_entries.SOURCE_DHCP, info=None):
+    info = info or (_dhcp() if source == config_entries.SOURCE_DHCP else _zeroconf())
+    return await hass.config_entries.flow.async_init(DOMAIN, context={"source": source}, data=info)
+
+
+async def test_dhcp_discovery(hass: HomeAssistant, aioclient_mock) -> None:
+    aioclient_mock.get(f"{BASE_URL}/status.json", text=load_fixture("status.json"))
+
+    result = await _discover(hass)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "discovery_confirm"
+    assert result["description_placeholders"]["host"] == APEX_IP
+    assert result["description_placeholders"]["serial"] == "AC5:12345"
+
+    # monitoring needs no password
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_USERNAME: "admin"})
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"] == USER_INPUT
+    assert result["result"].unique_id == UID_BASE
+
+
+async def test_discovery_with_a_password(hass: HomeAssistant, aioclient_mock) -> None:
+    aioclient_mock.get(f"{BASE_URL}/status.json", text=load_fixture("status.json"))
+    aioclient_mock.post(f"{HOST_URL}/rest/login", status=401)
+
+    result = await _discover(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_USERNAME: "admin", CONF_PASSWORD: "wrong"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_auth"}
+
+
+async def test_zeroconf_discovery(hass: HomeAssistant, aioclient_mock) -> None:
+    aioclient_mock.get(f"{BASE_URL}/status.json", text=load_fixture("status.json"))
+    result = await _discover(hass, config_entries.SOURCE_ZEROCONF)
+    assert result["step_id"] == "discovery_confirm"
+
+
+async def test_zeroconf_ipv6_is_ignored(hass: HomeAssistant, aioclient_mock) -> None:
+    result = await _discover(hass, config_entries.SOURCE_ZEROCONF, _zeroconf("fe80::1"))
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "not_ipv4_address"
+
+
+async def test_discovery_of_something_else(hass: HomeAssistant, aioclient_mock) -> None:
+    aioclient_mock.get(f"{BASE_URL}/status.json", status=404)
+    aioclient_mock.get(f"{BASE_URL}/status.xml", status=404)
+    result = await _discover(hass)
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "not_apex"
+
+
+async def test_discovery_of_a_configured_apex_asks_nothing(hass: HomeAssistant, aioclient_mock) -> None:
+    MockConfigEntry(domain=DOMAIN, data=USER_INPUT, unique_id=UID_BASE).add_to_hass(hass)
+    result = await _discover(hass)
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert aioclient_mock.mock_calls == []
+
+
+async def test_discovery_follows_an_apex_to_a_new_address(hass: HomeAssistant, aioclient_mock) -> None:
+    entry = MockConfigEntry(domain=DOMAIN, data={**USER_INPUT, CONF_IP_ADDRESS: "9.9.9.9"}, unique_id=UID_BASE)
+    entry.add_to_hass(hass)
+    aioclient_mock.get(f"{BASE_URL}/status.json", text=load_fixture("status.json"))
+
+    result = await _discover(hass)
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert entry.data[CONF_IP_ADDRESS] == APEX_IP
+
+
+async def test_discovery_keeps_a_hostname(hass: HomeAssistant, aioclient_mock) -> None:
+    entry = MockConfigEntry(domain=DOMAIN, data={**USER_INPUT, CONF_IP_ADDRESS: "apex.local"}, unique_id=UID_BASE)
+    entry.add_to_hass(hass)
+    aioclient_mock.get(f"{BASE_URL}/status.json", text=load_fixture("status.json"))
+
+    result = await _discover(hass)
+    assert result["reason"] == "already_configured"
+    assert entry.data[CONF_IP_ADDRESS] == "apex.local"
+
+
+# --- options: outputs as lights and fans -----------------------------------
+
+
+async def _loaded_entry(hass: HomeAssistant, aioclient_mock, options: dict | None = None) -> MockConfigEntry:
+    aioclient_mock.get(f"{BASE_URL}/status.json", text=load_fixture("status.json"))
+    aioclient_mock.post(f"{HOST_URL}/rest/login", json={"connect.sid": "sid-1"})
+    aioclient_mock.get(f"{HOST_URL}/rest/status", text=load_fixture("rest_status.json"))
+    aioclient_mock.get(f"{HOST_URL}/rest/config", text=load_fixture("rest_config.json"))
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={**USER_INPUT, CONF_PASSWORD: "secret"}, options=options or {}, unique_id=UID_BASE
+    )
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    return entry
+
+
+def _field_options(result, key: str) -> dict[str, str]:
+    field = next(k for k in result["data_schema"].schema if k == key)
+    config = result["data_schema"].schema[field].config
+    return {o["value"]: o["label"] for o in config["options"]}
+
+
+async def test_options_pick_lights_and_fans(hass: HomeAssistant, aioclient_mock) -> None:
+    entry = await _loaded_entry(hass, aioclient_mock)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    # only variable outputs
+    assert _field_options(result, CONF_FAN_OUTPUTS) == {
+        "0": "VarSpd1_I1",
+        "1": "VarSpd2_I2",
+        "2": "VarSpd3_I3",
+        "3": "VarSpd4_I4",
+    }
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_IP_ADDRESS: APEX_IP, CONF_USERNAME: "admin", CONF_FAN_OUTPUTS: ["0"], CONF_LIGHT_OUTPUTS: ["1", "2"]},
+    )
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_FAN_OUTPUTS] == ["0"]
+    assert entry.options[CONF_LIGHT_OUTPUTS] == ["1", "2"]
+    # reloaded with them
+    assert len(hass.states.async_entity_ids("fan")) == 1
+    assert len(hass.states.async_entity_ids("light")) == 2
+
+
+async def test_options_output_is_a_fan_or_a_light(hass: HomeAssistant, aioclient_mock) -> None:
+    entry = await _loaded_entry(hass, aioclient_mock)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_IP_ADDRESS: APEX_IP, CONF_USERNAME: "admin", CONF_FAN_OUTPUTS: ["0"], CONF_LIGHT_OUTPUTS: ["0"]},
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "fan_and_light"}
+
+
+async def test_options_keep_picks_while_not_loaded(hass: HomeAssistant, aioclient_mock) -> None:
+    entry = _options_entry(hass)
+    hass.config_entries.async_update_entry(entry, options={**entry.options, CONF_LIGHT_OUTPUTS: ["1"]})
+    aioclient_mock.get(f"{BASE_URL}/status.json", text=load_fixture("status.json"))
+    aioclient_mock.post(f"{HOST_URL}/rest/login", json={"connect.sid": "sid-1"})
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    # the outputs aren't known, so they can't be listed
+    assert CONF_LIGHT_OUTPUTS not in result["data_schema"].schema
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_IP_ADDRESS: APEX_IP, CONF_USERNAME: "admin"}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_LIGHT_OUTPUTS] == ["1"]

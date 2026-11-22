@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import aiohttp
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -35,6 +36,8 @@ class ApexRuntimeData:
     rest: ApexRestClient | None
     uid_base: str
     device: DeviceInfo
+    # the modules last registered as devices (see async_sync_module_devices)
+    module_devices: list[tuple[Any, ...]] = field(default_factory=list)
 
     @property
     def control(self) -> ApexRestClient | None:
@@ -99,14 +102,106 @@ def async_add_discovered(
     entry.async_on_unload(coordinator.async_add_listener(_add_new))
 
 
+# AquaBus module models by hwtype, as the Apex names them
+MODULE_MODELS: dict[str, str] = {
+    "1LNK": "1Link",
+    "AFS": "Automatic Feeding System",
+    "ALD": "Advanced Leak Detection",
+    "ASM": "Advanced Sensors Module",
+    "AWM": "AI Wireless Module",
+    "COR": "COR",
+    "Disp": "Display",
+    "DOS": "DOS",
+    "DQD": "DOS QD",
+    "EB4": "Energy Bar 4",
+    "EB6": "Energy Bar 6",
+    "EB632": "Energy Bar 632",
+    "EB8": "Energy Bar 8",
+    "EB832": "Energy Bar 832",
+    "FMM": "Fluid Monitoring Module",
+    "IOTA": "IOTA Module",
+    "LDM": "Leak Detection Module",
+    "LSM": "Lunar Simulation Module",
+    "MXM": "Mobius Expansion Module",
+    "PM1": "Probe Module 1",
+    "PM2": "Probe Module 2",
+    "PM3": "Probe Module 3",
+    "TH": "Trident TH",
+    "TNP": "Trident NP",
+    "TRI": "Trident",
+    "VDM": "Variable Dimming Module",
+    "WXM": "Wireless Expansion Module",
+}
+
+
+def module_config(data: dict[str, Any] | None, abaddr: Any) -> dict[str, Any]:
+    """A module's entry in /rest/config mconf, by its AquaBus address."""
+    config = (data or {}).get("config") or {}
+    for m in config.get("mconf") or []:
+        if isinstance(m, dict) and m.get("abaddr") == abaddr:
+            return m
+    return {}
+
+
+def find_module(data: dict[str, Any] | None, abaddr: Any) -> dict[str, Any]:
+    """A module's entry in /rest/status modules, by its AquaBus address."""
+    for m in (data or {}).get("modules", []) or []:
+        if m.get("abaddr") == abaddr:
+            return m
+    return {}
+
+
+def module_name(data: dict[str, Any] | None, module: dict[str, Any]) -> str:
+    """What the module is called on the Apex (e.g. EB8_DOWN2), else its type and address."""
+    name = module_config(data, module.get("abaddr")).get("name") or module.get("name")
+    return str(name) if name else f"{module.get('hwtype')}_{module.get('abaddr')}"
+
+
+def module_device(data: ApexRuntimeData, abaddr: Any) -> DeviceInfo:
+    """The device of an AquaBus module, registered by async_sync_module_devices."""
+    return DeviceInfo(identifiers={(DOMAIN, f"{data.uid_base}_module_{abaddr}")})
+
+
+@callback
+def async_sync_module_devices(hass: HomeAssistant, entry: ApexConfigEntry) -> None:
+    """Register a device per AquaBus module, connected through the Apex, and keep it current.
+
+    Done here rather than through each entity's DeviceInfo, since DeviceInfo's via_device is
+    deprecated in newer Home Assistant and its replacement doesn't exist in older ones.
+    """
+    data = entry.runtime_data
+    d = data.coordinator.data or {}
+    modules = [m for m in d.get("modules", []) or [] if isinstance(m.get("abaddr"), int)]
+    seen = [(m["abaddr"], module_name(d, m), m.get("hwtype"), m.get("swrev"), m.get("hwrev")) for m in modules]
+    if not modules or seen == data.module_devices:
+        return
+    data.module_devices = seen
+
+    registry = dr.async_get(hass)
+    apex = registry.async_get_or_create(config_entry_id=entry.entry_id, **data.device)
+    for abaddr, name, hwtype, swrev, hwrev in seen:
+        hwtype = str(hwtype or "")
+        device = registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers=module_device(data, abaddr)["identifiers"],
+            name=name,
+            manufacturer="Neptune Systems",
+            model=MODULE_MODELS.get(hwtype, hwtype or None),
+            sw_version=str(swrev) if swrev is not None else None,
+            hw_version=str(hwrev) if hwrev is not None else None,
+        )
+        if device.via_device_id != apex.id:
+            registry.async_update_device(device.id, via_device_id=apex.id)
+
+
 class ApexEntity(CoordinatorEntity[ApexDataUpdateCoordinator]):
-    """Named after the Apex device, so renaming the device renames its entities."""
+    """Named after its device (the Apex, or one of its modules), so renaming the device renames its entities."""
 
     _attr_has_entity_name = True
 
-    def __init__(self, data: ApexRuntimeData, key: str, name: str):
+    def __init__(self, data: ApexRuntimeData, key: str, name: str, device: DeviceInfo | None = None):
         super().__init__(data.coordinator)
-        self._attr_device_info = data.device
+        self._attr_device_info = device or data.device
         self._attr_unique_id = f"{data.uid_base}_{key}".lower()
         self._attr_name = name
 

@@ -14,6 +14,7 @@ from homeassistant.const import (
 
 _RE_UNDERSCORE_NUM = re.compile(r"^(?P<base>[A-Za-z]+)_(?P<num>\d+)$")                 # Amp_14
 _RE_TRAILING = re.compile(r"^(?P<base>[A-Za-z]+)(?:(?P<module>x\d+)|(?P<num>\d+))$")  # Tmp2, Alkx5, pHx8
+_RE_SET = re.compile(r"^\s*Set\s+(\S+)\s*$", re.IGNORECASE)                           # Set 75
 
 
 class ProbeType(NamedTuple):
@@ -144,3 +145,19 @@ def safe_uid_base(s: str) -> str:
 def apex_uid(meta: dict[str, Any], host: str) -> str:
     """The Apex's id for unique_ids: its serial, or the host when it doesn't report one."""
     return safe_uid_base(meta.get("serial") or "") or safe_uid_base(host)
+
+
+def program_setting(prog: str | None) -> int | float | str | None:
+    """What a "Set ..." program sets: a number (Set 75), or a profile or state (Set PF1, Set ON)."""
+    lines = [line for line in (prog or "").splitlines() if line.strip()]
+    if len(lines) != 1:
+        return None
+    m = _RE_SET.match(lines[0])
+    if not m:
+        return None
+    value = m.group(1)
+    try:
+        number = float(value)
+    except ValueError:
+        return value
+    return int(number) if number.is_integer() else number

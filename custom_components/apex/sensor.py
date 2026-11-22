@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import math
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -14,8 +13,8 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import PERCENTAGE, UnitOfElectricCurrent, UnitOfEnergy, UnitOfPower, UnitOfVolume
 from homeassistant.helpers.entity import EntityCategory
-from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.util.dt import now as dt_now
+from homeassistant.helpers.restore_state import ExtraStoredData, RestoredExtraData, RestoreEntity
+from homeassistant.util.dt import now as dt_now, parse_datetime
 
 from .entity import (
     DOS_TYPES,
@@ -24,14 +23,21 @@ from .entity import (
     ApexOutputEntity,
     ApexRuntimeData,
     async_add_discovered,
+    find_module,
     find_output_config,
+    module_config,
+    module_device,
+    module_name,
     output_key,
 )
-from .parsing import FMM_MODES, build_labels, module_unit, probe_type, temp_unit
+from .parsing import FMM_MODES, build_labels, module_unit, probe_type, program_setting, temp_unit
 from .rest import FEED_LETTERS
 
 # outputs whose program is usually just "Set <value>"
 VARIABLE_TYPES = ("variable", "virtual")
+
+# probes that need calibrating now and then (by their Apex type, lowercased)
+CALIBRATED_TYPES = ("ph", "orp", "cond")
 
 TRIDENT_TYPES = ("TRI", "TNP", "TH")
 # status extra.levels, as the Apex dashboard reads it: [waste used, ?, reagent C, reagent B, reagent A]
@@ -93,53 +99,19 @@ def dos_volumes(o: dict[str, Any]) -> tuple[float | None, float | None]:
     return num(3), num(4)
 
 
-_SET_RE = re.compile(r"^\s*Set\s+(\S+)\s*$", re.IGNORECASE)
-
-
-def program_setting(prog: str | None) -> int | float | str | None:
-    """What a "Set ..." program sets: a number (Set 75), or a profile or state (Set PF1, Set ON)."""
-    lines = [line for line in (prog or "").splitlines() if line.strip()]
-    if len(lines) != 1:
-        return None
-    m = _SET_RE.match(lines[0])
-    if not m:
-        return None
-    value = m.group(1)
-    try:
-        number = float(value)
-    except ValueError:
-        return value
-    return int(number) if number.is_integer() else number
-
-
-def _module_config(data: dict[str, Any] | None, abaddr: Any) -> dict[str, Any]:
+def input_config(data: dict[str, Any] | None, input_name: str) -> dict[str, Any]:
+    """An input's entry in /rest/config iconf, by its Apex name."""
     config = (data or {}).get("config") or {}
-    for m in config.get("mconf") or []:
-        if isinstance(m, dict) and m.get("abaddr") == abaddr:
-            return m
+    for i in config.get("iconf") or []:
+        if isinstance(i, dict) and i.get("name") == input_name:
+            return i
     return {}
 
 
 def _input_module_config(data: dict[str, Any] | None, input_name: str) -> dict[str, Any]:
     """The config of the module an input is on, by its device id (e.g. "1_P0" is on module 1)."""
-    config = (data or {}).get("config") or {}
-    for i in config.get("iconf") or []:
-        if isinstance(i, dict) and i.get("name") == input_name:
-            addr = str(i.get("did") or "").partition("_")[0]
-            return _module_config(data, int(addr)) if addr.isdigit() else {}
-    return {}
-
-
-def _module_name(data: dict[str, Any], module: dict[str, Any]) -> str:
-    name = _module_config(data, module.get("abaddr")).get("name")
-    return str(name) if name else f"{module.get('hwtype')}_{module.get('abaddr')}"
-
-
-def _find_module(data: dict[str, Any] | None, abaddr: Any) -> dict[str, Any]:
-    for m in (data or {}).get("modules", []) or []:
-        if m.get("abaddr") == abaddr:
-            return m
-    return {}
+    addr = str(input_config(data, input_name).get("did") or "").partition("_")[0]
+    return module_config(data, int(addr)) if addr.isdigit() else {}
 
 
 def _epoch_to_datetime(epoch: Any) -> datetime | None:
@@ -191,23 +163,45 @@ async def async_setup_entry(hass, entry: ApexConfigEntry, async_add_entities):
             if typ in VARIABLE_TYPES and find_output_config(d, o.get("device_id")):
                 yield f"output_{key}_setting", lambda key=key, name=name: ApexSettingSensor(data, key, name)
 
-        # Trident levels (REST status, so only with a password)
+        # When pH, ORP and salinity probes were calibrated (REST config, so only with a password)
+        for name in sorted(probes):
+            probe = probes[name]
+            if (probe.get("type") or "").strip().lower() in CALIBRATED_TYPES and input_config(d, probe.get("name") or name):
+                label = labels.get(name) or name
+                yield (
+                    f"{name}_calibrated",
+                    lambda name=name, label=label, apex_name=probe.get("name") or name: (
+                        ApexCalibrationSensor(data, name, apex_name, label)
+                    ),
+                )
+
+        # Wi-Fi signal (REST status), while the Apex is on Wi-Fi
+        if ((d.get("network") or {}).get("wifiEnable")) is True:
+            yield "wifi_signal", lambda: ApexWifiSignalSensor(data)
+
+        # AquaBus modules (REST status, so only with a password)
         for m in d.get("modules", []) or []:
+            abaddr = m.get("abaddr")
+            if not isinstance(abaddr, int):
+                continue
+            yield f"module_{abaddr}_errors", lambda abaddr=abaddr: ApexModuleErrorsSensor(data, abaddr)
+
+            # Trident levels
             hwtype = m.get("hwtype")
             levels = (m.get("extra") or {}).get("levels")
             if hwtype not in TRIDENT_TYPES or not isinstance(levels, list) or len(levels) < 5:
                 continue
-            abaddr, module_name = m["abaddr"], _module_name(d, m)
+            mod_name = module_name(d, m)
             for letter, index in zip(trident_reagent_names(hwtype), TRIDENT_REAGENTS):
                 yield (
                     f"trident_{abaddr}_reagent_{letter}",
-                    lambda letter=letter, index=index, abaddr=abaddr, module_name=module_name: (
-                        ApexTridentReagentSensor(data, abaddr, module_name, letter, index)
+                    lambda letter=letter, index=index, abaddr=abaddr, mod_name=mod_name: (
+                        ApexTridentReagentSensor(data, abaddr, mod_name, letter, index)
                     ),
                 )
             yield (
                 f"trident_{abaddr}_waste",
-                lambda abaddr=abaddr, module_name=module_name: ApexTridentWasteSensor(data, abaddr, module_name),
+                lambda abaddr=abaddr, mod_name=mod_name: ApexTridentWasteSensor(data, abaddr, mod_name),
             )
 
     async_add_discovered(entry, async_add_entities, discover)
@@ -465,7 +459,7 @@ class ApexTridentSensor(ApexEntity, SensorEntity):
         self._abaddr = abaddr
 
     def _module(self) -> dict[str, Any]:
-        return _find_module(self.coordinator.data, self._abaddr)
+        return find_module(self.coordinator.data, self._abaddr)
 
     def _level(self, index: int) -> float | None:
         levels = (self._module().get("extra") or {}).get("levels") or []
@@ -519,7 +513,7 @@ class ApexTridentWasteSensor(ApexTridentSensor):
     @property
     def extra_state_attributes(self):
         used = self._level(TRIDENT_WASTE)
-        size = _number((_module_config(self.coordinator.data, self._abaddr).get("extra") or {}).get("wasteSize"))
+        size = _number((module_config(self.coordinator.data, self._abaddr).get("extra") or {}).get("wasteSize"))
         emptied = self._reset_time(TRIDENT_WASTE)
         return {
             # size 0: the waste goes to a drain
@@ -615,3 +609,130 @@ class ApexFeedEndsSensor(ApexFeedEntity):
     @property
     def native_value(self) -> datetime | None:
         return self._ends
+
+
+class ApexCalibrationSensor(ApexEntity, RestoreEntity, SensorEntity):
+    """When a probe was last calibrated, as seen by the integration.
+
+    The Apex keeps no calibration history, only each probe's calibration (scale and offset in
+    its input config). This notices when that changes, so it's unknown until the first
+    calibration after the integration is set up, and accurate to the config refresh (5 minutes).
+    """
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:calendar-check"
+
+    def __init__(self, data: ApexRuntimeData, probe_key: str, apex_name: str, label: str):
+        super().__init__(data, f"{probe_key}_calibrated", f"{label} Calibrated")
+        self._apex_name = apex_name
+        # the probe's calibration when last seen, and when it last changed
+        self._calibration: list[str] | None = None
+        self._calibrated: datetime | None = None
+
+    def _current_calibration(self) -> list[str] | None:
+        extra = input_config(self.coordinator.data, self._apex_name).get("extra")
+        if not isinstance(extra, dict) or ("scale" not in extra and "offset" not in extra):
+            return None
+        return [str(extra.get("scale")), str(extra.get("offset"))]
+
+    def _update_calibration(self) -> None:
+        current = self._current_calibration()
+        if current is None:
+            # the config hasn't been read (yet): keep what we know
+            return
+        if self._calibration is not None and current != self._calibration:
+            self._calibrated = dt_now()
+        self._calibration = current
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_extra_data()
+        if last is not None:
+            stored = last.as_dict()
+            calibration = stored.get("calibration")
+            if isinstance(calibration, list) and len(calibration) == 2:
+                self._calibration = [str(v) for v in calibration]
+            calibrated = stored.get("calibrated")
+            self._calibrated = parse_datetime(calibrated) if isinstance(calibrated, str) else None
+        # e.g. calibrated while Home Assistant was stopped
+        self._update_calibration()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self._update_calibration()
+        super()._handle_coordinator_update()
+
+    @property
+    def extra_restore_state_data(self) -> ExtraStoredData:
+        return RestoredExtraData(
+            {
+                "calibration": self._calibration,
+                "calibrated": self._calibrated.isoformat() if self._calibrated else None,
+            }
+        )
+
+    @property
+    def native_value(self) -> datetime | None:
+        return self._calibrated
+
+    @property
+    def extra_state_attributes(self):
+        return {"apex_probe_name": self._apex_name}
+
+
+class ApexWifiSignalSensor(ApexEntity, SensorEntity):
+    """Wi-Fi signal strength (%), as the Apex's network page shows it; quality is an attribute."""
+
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:wifi"
+
+    def __init__(self, data: ApexRuntimeData):
+        super().__init__(data, "wifi_signal", "Wi-Fi Signal")
+
+    def _network(self) -> dict[str, Any]:
+        return (self.coordinator.data or {}).get("network") or {}
+
+    @property
+    def available(self) -> bool:
+        # e.g. the Apex was moved to Ethernet
+        return super().available and self._network().get("wifiEnable") is True
+
+    @property
+    def native_value(self):
+        return _number(self._network().get("strength"))
+
+    @property
+    def extra_state_attributes(self):
+        return {"quality": _number(self._network().get("quality"))}
+
+
+class ApexModuleErrorsSensor(ApexEntity, SensorEntity):
+    """AquaBus communication errors of a module since the Apex started; a rising count hints at a bad cable."""
+
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+    _attr_icon = "mdi:alert-circle-outline"
+
+    def __init__(self, data: ApexRuntimeData, abaddr: int):
+        super().__init__(data, f"module_{abaddr}_errors", "AquaBus Errors", module_device(data, abaddr))
+        self._abaddr = abaddr
+
+    def _module(self) -> dict[str, Any]:
+        return find_module(self.coordinator.data, self._abaddr)
+
+    @property
+    def available(self) -> bool:
+        return super().available and bool(self._module())
+
+    @property
+    def native_value(self):
+        return _number(self._module().get("perror"))
+
+    @property
+    def extra_state_attributes(self):
+        m = self._module()
+        return {"packets": m.get("pcount"), "good_packets": m.get("pgood"), "reattached": m.get("reatt")}

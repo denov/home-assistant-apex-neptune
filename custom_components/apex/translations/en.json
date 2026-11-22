@@ -18,6 +18,17 @@
         "title": "Apex found",
         "description": "Hostname: {hostname}\nSerial: {serial}\nSoftware: {software}\nHardware: {hardware}"
       },
+      "discovery_confirm": {
+        "title": "Apex found on your network",
+        "description": "Set up the Apex at {host}?\nHostname: {hostname}\nSerial: {serial}\nSoftware: {software}\nHardware: {hardware}\n\nThe password is optional: monitoring works without it.",
+        "data": {
+          "username": "Username",
+          "password": "Password"
+        },
+        "data_description": {
+          "password": "Optional for monitoring. Needed to control outputs and feed cycles, and for Trident levels and firmware updates."
+        }
+      },
       "reauth_confirm": {
         "title": "Apex password",
         "description": "The Apex at {host} rejected the password for {username}. Enter the current password, or remove it to only monitor the Apex.",
@@ -37,8 +48,12 @@
     },
     "abort": {
       "already_configured": "This Apex is already set up.",
-      "reauth_successful": "The Apex password was updated."
-    }
+      "reauth_successful": "The Apex password was updated.",
+      "not_apex": "This device isn't an Apex the integration can read.",
+      "not_ipv4_address": "The Apex was found without an IPv4 address.",
+      "already_in_progress": "This Apex is already being set up."
+    },
+    "flow_title": "{name} ({host})"
   },
   "options": {
     "step": {
@@ -55,20 +70,25 @@
           "amps_diagnostic": "Show current (Amps) probes as diagnostics",
           "line_voltage": "Line voltage",
           "enable_per_outlet_power": "Energy sensors for outlets that measure power",
-          "read_only": "Read-only"
+          "read_only": "Read-only",
+          "fan_outputs": "Pumps (fan entities)",
+          "light_outputs": "Lights (light entities)"
         },
         "data_description": {
           "password": "Leave blank to keep the current password. Needed to control outputs and feed cycles, and for Trident levels and firmware updates.",
           "fmm_units": "What your FMM's level and flow sensors are set to on the Apex. Only used without a password: with one, the integration reads the setting from the Apex.",
           "line_voltage": "Used for Total Power (total current × voltage). 120 in North America, 230 in most other places.",
           "enable_per_outlet_power": "Adds an energy (kWh) sensor for each outlet on an energy bar that reports watts (EB832).",
-          "read_only": "Monitor only: no control entities or actions, even with a password."
+          "read_only": "Monitor only: no control entities or actions, even with a password.",
+          "fan_outputs": "Variable outputs to control as a fan, with speed. Setting the speed replaces the output's program with \"Set\" and the speed (e.g. Set 60), so any program it had is lost. Needs the password, and read-only off.",
+          "light_outputs": "Variable outputs to control as a light, with brightness. Setting the brightness replaces the output's program with \"Set\" and the brightness (e.g. Set 75), so any program it had is lost. Needs the password, and read-only off."
         }
       }
     },
     "error": {
       "cannot_connect": "Couldn't reach the Apex. Check the host or IP address.",
-      "invalid_auth": "The Apex rejected the username or password."
+      "invalid_auth": "The Apex rejected the username or password.",
+      "fan_and_light": "An output can be a pump or a light, not both."
     }
   },
   "entity": {

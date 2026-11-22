@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 from __future__ import annotations
 
-from typing import Any
+import ipaddress
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
 import voluptuous as vol
@@ -25,13 +26,23 @@ from .const import (
     CONF_LINE_VOLTAGE,
     CONF_ENABLE_PER_OUTLET_POWER,
     CONF_READ_ONLY,
+    CONF_FAN_OUTPUTS,
+    CONF_LIGHT_OUTPUTS,
     ApexSettings,
 )
 from .coordinator import async_fetch_status
+from .entity import device_name
 from .parsing import apex_uid
 from .rest import ApexAuthError, ApexRestClient
+from .variable import level_outputs
+
+if TYPE_CHECKING:
+    from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
+    from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
 CONNECTION_KEYS = (CONF_IP_ADDRESS, CONF_USERNAME, CONF_PASSWORD)
+# options only shown while the entry is loaded (they list its outputs)
+OUTPUT_KEYS = (CONF_FAN_OUTPUTS, CONF_LIGHT_OUTPUTS)
 CONF_REMOVE_PASSWORD = "remove_password"
 
 # never sent back to the browser: an empty field keeps the stored password
@@ -91,7 +102,34 @@ def _confirm_placeholders(meta: dict[str, Any]) -> dict[str, str]:
     return {key: str(meta.get(key) or "-") for key in ("hostname", "serial", "software", "hardware")}
 
 
-def _schema_options(s: ApexSettings) -> vol.Schema:
+def _is_ip_address(host: str | None) -> bool:
+    try:
+        ipaddress.ip_address(host or "")
+    except ValueError:
+        return False
+    return True
+
+
+def _outputs_selector(outputs: dict[str, str]) -> selector.SelectSelector:
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=[selector.SelectOptionDict(value=k, label=v) for k, v in outputs.items()],
+            multiple=True,
+            mode=selector.SelectSelectorMode.DROPDOWN,
+        )
+    )
+
+
+def _schema_options(s: ApexSettings, outputs: dict[str, str] | None = None) -> vol.Schema:
+    """outputs: the variable outputs that can be lights or fans (label by output key), when known."""
+    fields: dict[Any, Any] = {}
+    if outputs:
+        # keep a pick whose output is gone, so it isn't dropped silently
+        known = {**outputs, **{k: k for k in (*s.fan_outputs, *s.light_outputs) if k not in outputs}}
+        fields = {
+            vol.Optional(CONF_FAN_OUTPUTS, default=list(s.fan_outputs)): _outputs_selector(known),
+            vol.Optional(CONF_LIGHT_OUTPUTS, default=list(s.light_outputs)): _outputs_selector(known),
+        }
     return vol.Schema(
         {
             vol.Required(CONF_IP_ADDRESS, default=s.host): str,
@@ -105,6 +143,7 @@ def _schema_options(s: ApexSettings) -> vol.Schema:
             vol.Optional(CONF_LINE_VOLTAGE, default=s.line_voltage): LINE_VOLTAGE_SELECTOR,
             vol.Optional(CONF_ENABLE_PER_OUTLET_POWER, default=s.per_outlet_energy): selector.BooleanSelector(),
             vol.Optional(CONF_READ_ONLY, default=s.read_only): selector.BooleanSelector(),
+            **fields,
         }
     )
 
@@ -189,6 +228,59 @@ class ApexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders=_confirm_placeholders(self._meta),
         )
 
+    async def async_step_dhcp(self, discovery_info: DhcpServiceInfo):
+        return await self._async_step_discovered(discovery_info.ip)
+
+    async def async_step_zeroconf(self, discovery_info: ZeroconfServiceInfo):
+        address = discovery_info.ip_address
+        if address is None or address.version != 4 or address.is_link_local:
+            return self.async_abort(reason="not_ipv4_address")
+        return await self._async_step_discovered(str(address))
+
+    async def _async_step_discovered(self, host: str):
+        """Something on the network looks like an Apex: check it is one, and offer it."""
+        self._async_abort_entries_match({CONF_IP_ADDRESS: host})
+        meta, error = await _async_validate(self.hass, ApexSettings.from_dict({CONF_IP_ADDRESS: host}))
+        if error:
+            return self.async_abort(reason="not_apex")
+
+        uid = apex_uid(meta, host)
+        await self.async_set_unique_id(uid)
+        entry = self.hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, uid)
+        if entry is not None and _is_ip_address(entry.data.get(CONF_IP_ADDRESS)):
+            # set up by IP address and since moved: follow it (one set up by hostname keeps its hostname)
+            self._abort_if_unique_id_configured(updates={CONF_IP_ADDRESS: host})
+        self._abort_if_unique_id_configured()
+
+        self._meta = meta
+        self._user_input = {CONF_IP_ADDRESS: host, CONF_USERNAME: DEFAULT_USERNAME, CONF_PASSWORD: ""}
+        self.context["title_placeholders"] = {"name": device_name(meta), "host": host}
+        return await self.async_step_discovery_confirm()
+
+    async def async_step_discovery_confirm(self, user_input=None):
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            user_input = {**self._user_input, **user_input, CONF_IP_ADDRESS: self._user_input[CONF_IP_ADDRESS]}
+            user_input[CONF_PASSWORD] = user_input.get(CONF_PASSWORD) or ""
+            if user_input[CONF_PASSWORD]:
+                _, error = await _async_validate(self.hass, ApexSettings.from_dict(user_input))
+                if error:
+                    errors["base"] = error
+            if not errors:
+                return self.async_create_entry(title=f"Apex @ {user_input[CONF_IP_ADDRESS]}", data=user_input)
+
+        return self.async_show_form(
+            step_id="discovery_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_USERNAME, default=DEFAULT_USERNAME): str,
+                    vol.Optional(CONF_PASSWORD): PASSWORD_SELECTOR,
+                }
+            ),
+            description_placeholders={**_confirm_placeholders(self._meta), "host": self._user_input[CONF_IP_ADDRESS]},
+            errors=errors,
+        )
+
     async def async_step_reauth(self, entry_data: dict[str, Any]):
         """The Apex rejected the password (started by the coordinator or a control action)."""
         return await self.async_step_reauth_confirm()
@@ -238,14 +330,24 @@ class ApexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class ApexOptionsFlow(config_entries.OptionsFlow):
+    def _level_outputs(self) -> dict[str, str]:
+        """The entry's variable outputs, which can be lights or fans; none known unless it's loaded."""
+        entry = self.config_entry
+        if entry.state is not config_entries.ConfigEntryState.LOADED:
+            return {}
+        return level_outputs(entry.runtime_data.coordinator.data)
+
     async def async_step_init(self, user_input=None):
         entry = self.config_entry
         # connection settings used to be saved in the options too
         current = {**entry.data, **entry.options}
+        outputs = self._level_outputs()
         errors: dict[str, str] = {}
 
         if user_input is not None:
             user_input = {
+                # light and fan picks aren't shown while the outputs are unknown: keep them
+                **{k: current[k] for k in OUTPUT_KEYS if k in current and not outputs},
                 **user_input,
                 CONF_IP_ADDRESS: normalize_host(user_input[CONF_IP_ADDRESS]),
                 CONF_PASSWORD: user_input.get(CONF_PASSWORD) or current.get(CONF_PASSWORD, ""),
@@ -253,6 +355,8 @@ class ApexOptionsFlow(config_entries.OptionsFlow):
             _, error = await _async_validate(self.hass, ApexSettings.from_dict(user_input))
             if error:
                 errors["base"] = error
+            elif set(user_input.get(CONF_FAN_OUTPUTS) or ()) & set(user_input.get(CONF_LIGHT_OUTPUTS) or ()):
+                errors["base"] = "fan_and_light"
             else:
                 # connection settings live in the entry's data, the rest in its options
                 # (one update, so the entry reloads once)
@@ -263,5 +367,5 @@ class ApexOptionsFlow(config_entries.OptionsFlow):
             current = {**current, **user_input}
 
         return self.async_show_form(
-            step_id="init", data_schema=_schema_options(ApexSettings.from_dict(current)), errors=errors
+            step_id="init", data_schema=_schema_options(ApexSettings.from_dict(current), outputs), errors=errors
         )

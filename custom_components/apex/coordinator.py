@@ -127,7 +127,7 @@ class ApexDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._json_seen = False
         self._json_retry_at: float | None = None
         self._json_failing = False
-        self._extras: dict[str, Any] = {"modules": [], "config": None}
+        self._extras: dict[str, Any] = {"modules": [], "network": None, "config": None}
         self._extras_at: float | None = None
         self._extras_failing = False
 
@@ -234,8 +234,11 @@ class ApexDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.info("Apex REST API is readable again")
         self._extras_failing = False
         modules = status.get("modules")
+        network = status.get("nstat")
         self._extras = {
             "modules": [m for m in modules if isinstance(m, dict)] if isinstance(modules, list) else [],
+            # Wi-Fi and network status
+            "network": network if isinstance(network, dict) else None,
             "config": config,
         }
 
@@ -301,6 +304,7 @@ def _parse_status_xml(xml_text: str) -> dict[str, Any]:
         "outlets": outlets,
         "inputs": {},  # status.xml doesn't report digital inputs
         "feed": None,  # or the feed cycle
+        "link": None,  # or the Apex Fusion link
     }
 
 
@@ -419,6 +423,11 @@ def _parse_status_json(json_text: str) -> dict[str, Any]:
             "active": active if isinstance(active, int) else None,
         }
 
+    link_raw = istat.get("link")
+    link_state = link_raw.get("linkState") if isinstance(link_raw, dict) else None
+    # the Apex Fusion link: linkState 3 is connected (what the Apex dashboard shows as OK)
+    link = {"state": link_state} if isinstance(link_state, int) and not isinstance(link_state, bool) else None
+
     return {
         "source": "json",
         "meta": meta,
@@ -427,4 +436,5 @@ def _parse_status_json(json_text: str) -> dict[str, Any]:
         "outlets": outlets,
         "inputs": inputs,
         "feed": feed,
+        "link": link,
     }

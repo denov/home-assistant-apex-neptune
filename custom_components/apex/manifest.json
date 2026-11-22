@@ -4,9 +4,11 @@
   "codeowners": ["@denov"],
   "config_flow": true,
   "dependencies": [],
+  "dhcp": [{ "hostname": "apex*" }],
   "documentation": "https://github.com/denov/home-assistant-apex-neptune",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/denov/home-assistant-apex-neptune/issues",
   "requirements": [],
-  "version": "1.8.1"
+  "version": "1.8.1",
+  "zeroconf": [{ "type": "_http._tcp.local.", "name": "apex*" }]
 }

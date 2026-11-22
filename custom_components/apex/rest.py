@@ -13,6 +13,9 @@ import aiohttp
 
 # status.json feed.name: 0 = no feed, 1-4 = feed A-D
 FEED_LETTERS: dict[int, str] = {1: "A", 2: "B", 3: "C", 4: "D"}
+# how long a feed cycle can last (config misc feedInterval), as the Apex's own page allows
+FEED_MIN_SECONDS = 60
+FEED_MAX_SECONDS = 65535
 
 # what the Apex UI sends as status[0] to change an output's mode
 OUTPUT_MODES = ("AUTO", "ON", "OFF")
@@ -144,6 +147,23 @@ class ApexRestClient:
 
     async def async_cancel_feed(self) -> None:
         await self._async_put("/rest/status/feed/0", {"name": 0, "active": 0})
+
+    async def async_set_feed_duration(self, feed: int, seconds: int) -> None:
+        """Set how long feed cycle 1-4 (A-D) lasts, as the Apex's Misc setup page does."""
+        if feed not in FEED_LETTERS:
+            raise ValueError(f"feed must be 1-4 (A-D), not {feed!r}")
+        if not FEED_MIN_SECONDS <= seconds <= FEED_MAX_SECONDS:
+            raise ValueError(f"a feed lasts {FEED_MIN_SECONDS}-{FEED_MAX_SECONDS} seconds, not {seconds}")
+        config = await self.async_get_config()
+        misc = config.get("misc")
+        intervals = misc.get("feedInterval") if isinstance(misc, dict) else None
+        if not isinstance(intervals, list) or len(intervals) < feed:
+            raise ApexRestError("Apex config has no feed durations")
+        intervals = list(intervals)
+        intervals[feed - 1] = int(seconds)
+        # never send "reboot" back: true reboots the Apex (its own page drops it too)
+        body = {k: v for k, v in misc.items() if k != "reboot"}
+        await self._async_put("/rest/config/misc", {**body, "feedInterval": intervals})
 
     async def async_set_output(self, did: str, mode: str) -> None:
         """Set an output to AUTO, ON or OFF, as the Apex dashboard does."""

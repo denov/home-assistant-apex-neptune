@@ -6,11 +6,11 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN, ApexSettings
 from .coordinator import ApexDataUpdateCoordinator
-from .entity import ApexConfigEntry, ApexRuntimeData, build_device
+from .entity import ApexConfigEntry, ApexRuntimeData, async_sync_module_devices, build_device
 from .rest import ApexRestClient
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-PLATFORMS: list[str] = ["sensor", "switch", "binary_sensor", "button", "select", "update"]
+PLATFORMS: list[str] = ["sensor", "switch", "binary_sensor", "button", "select", "update", "number", "light", "fan"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ApexConfigEntry) -> bool:
@@ -38,6 +38,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ApexConfigEntry) -> bool
         hass.config_entries.async_update_entry(entry, unique_id=uid_base)
 
     entry.runtime_data = ApexRuntimeData(settings, coordinator, rest, uid_base, device)
+    # before the platforms, so module entities find their devices
+    async_sync_module_devices(hass, entry)
+    entry.async_on_unload(coordinator.async_add_listener(lambda: async_sync_module_devices(hass, entry)))
 
     entry.async_on_unload(entry.add_update_listener(_update_listener))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

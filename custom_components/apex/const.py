@@ -21,6 +21,8 @@ CONF_AMPS_DIAGNOSTIC = "amps_diagnostic"    # bool (mark Amp_* as diagnostic)
 CONF_LINE_VOLTAGE = "line_voltage"          # volts (for total power W = A * V)
 CONF_ENABLE_PER_OUTLET_POWER = "enable_per_outlet_power"
 CONF_READ_ONLY = "read_only"                # bool: monitor only, never change the Apex
+CONF_FAN_OUTPUTS = "fan_outputs"            # output keys of variable outputs to control as fans (pumps)
+CONF_LIGHT_OUTPUTS = "light_outputs"        # output keys of variable outputs to control as lights
 
 
 # Defaults
@@ -35,6 +37,10 @@ DEFAULT_AMPS_DIAGNOSTIC = True  # keep Current/Amp_* under Diagnostic by default
 DEFAULT_LINE_VOLTAGE = 120      # US default; set 230 for EU
 DEFAULT_ENABLE_PER_OUTLET_POWER = False
 DEFAULT_READ_ONLY = False
+
+
+def _keys(v: Any) -> tuple[str, ...]:
+    return tuple(str(k) for k in v) if isinstance(v, (list, tuple)) else ()
 
 
 @dataclass(frozen=True)
@@ -52,6 +58,8 @@ class ApexSettings:
     line_voltage: int = DEFAULT_LINE_VOLTAGE
     per_outlet_energy: bool = DEFAULT_ENABLE_PER_OUTLET_POWER
     read_only: bool = DEFAULT_READ_ONLY
+    fan_outputs: tuple[str, ...] = ()
+    light_outputs: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> ApexSettings:
@@ -68,6 +76,8 @@ class ApexSettings:
             line_voltage=int(d.get(CONF_LINE_VOLTAGE, DEFAULT_LINE_VOLTAGE)),
             per_outlet_energy=bool(d.get(CONF_ENABLE_PER_OUTLET_POWER, DEFAULT_ENABLE_PER_OUTLET_POWER)),
             read_only=bool(d.get(CONF_READ_ONLY, DEFAULT_READ_ONLY)),
+            fan_outputs=_keys(d.get(CONF_FAN_OUTPUTS)),
+            light_outputs=_keys(d.get(CONF_LIGHT_OUTPUTS)),
         )
 
     @property
