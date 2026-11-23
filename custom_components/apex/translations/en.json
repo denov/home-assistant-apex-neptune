@@ -71,8 +71,8 @@
           "line_voltage": "Line voltage",
           "enable_per_outlet_power": "Energy sensors for outlets that measure power",
           "read_only": "Read-only",
-          "fan_outputs": "Pumps (fan entities)",
-          "light_outputs": "Lights (light entities)"
+          "fan_outputs": "Pumps",
+          "light_outputs": "Lights"
         },
         "data_description": {
           "password": "Leave blank to keep the current password. Needed to control outputs and feed cycles, and for Trident levels and firmware updates.",
@@ -80,8 +80,8 @@
           "line_voltage": "Used for Total Power (total current × voltage). 120 in North America, 230 in most other places.",
           "enable_per_outlet_power": "Adds an energy (kWh) sensor for each outlet on an energy bar that reports watts (EB832).",
           "read_only": "Monitor only: no control entities or actions, even with a password.",
-          "fan_outputs": "Variable outputs to control as a fan, with speed. Setting the speed replaces the output's program with \"Set\" and the speed (e.g. Set 60), so any program it had is lost. Needs the password, and read-only off.",
-          "light_outputs": "Variable outputs to control as a light, with brightness. Setting the brightness replaces the output's program with \"Set\" and the brightness (e.g. Set 75), so any program it had is lost. Needs the password, and read-only off."
+          "fan_outputs": "Variable outputs that run a pump, such as a DC return pump, to turn on and off and set its speed. Home Assistant has no pump entity type, so these are fan entities (on/off with a speed) with a pump icon. Setting the speed replaces the output's program with \"Set\" and the speed (e.g. Set 60), so any program it had is lost. Needs the password, and read-only off.",
+          "light_outputs": "Variable outputs that run a dimmable light, to turn on and off and set its brightness. Setting the brightness replaces the output's program with \"Set\" and the brightness (e.g. Set 75), so any program it had is lost. Needs the password, and read-only off."
         }
       }
     },
